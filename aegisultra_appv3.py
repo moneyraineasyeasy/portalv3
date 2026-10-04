@@ -67,6 +67,12 @@ RECOMMENDATION_DEFAULTS: Dict[str, Any] = {
     "compatibility_group": "",
     "status": "",
     "result": "",
+    # V3.1 movement / robustness fields
+    "movement_verdict": "",
+    "movement_strength": "",
+    "movement_agreement_ratio": None,
+    "movement_probability_change_pp": None,
+    "family_out_status": "",
 }
 
 MATCH_DEFAULTS: Dict[str, Any] = {
