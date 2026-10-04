@@ -2772,10 +2772,69 @@ def derive_matches_from_recommendations(
             else "published"
         )
 
+        # Try to derive a meaningful match name from the group
+        match_name = ""
+
+        # Check if any row has match_name
+        if "match_name" in group.columns:
+            names = group["match_name"].dropna().unique()
+            if len(names) > 0:
+                match_name = clean_text(names[0])
+
+        # If no match_name, try home_team vs away_team
+        if not match_name:
+            home_team = ""
+            away_team = ""
+
+            if "home_team" in group.columns:
+                homes = group["home_team"].dropna().unique()
+                if len(homes) > 0:
+                    home_team = clean_text(homes[0])
+
+            if "away_team" in group.columns:
+                aways = group["away_team"].dropna().unique()
+                if len(aways) > 0:
+                    away_team = clean_text(aways[0])
+
+            if home_team and away_team:
+                match_name = f"{home_team} vs {away_team}"
+
         rows.append({
             **MATCH_DEFAULTS,
             "match_id": normalized_id,
-            "match_name": normalized_id,
+            "match_name": match_name,
+            "home_team": (
+                clean_text(
+                    group["home_team"].dropna.iloc[0]
+                )
+                if "home_team" in group.columns
+                and len(group["home_team"].dropna()) > 0
+                else ""
+            ),
+            "away_team": (
+                clean_text(
+                    group["away_team"].dropna.iloc[0]
+                )
+                if "away_team" in group.columns
+                and len(group["away_team"].dropna()) > 0
+                else ""
+            ),
+            "competition": (
+                clean_text(
+                    group["competition"].dropna.iloc[0]
+                )
+                if "competition" in group.columns
+                and len(group["competition"].dropna()) > 0
+                else ""
+            ),
+            "kickoff": (
+                clean_text(
+                    group["kickoff"].dropna.iloc[0]
+                )
+                if "kickoff" in group.columns
+                and len(group["kickoff"].dropna()) > 0
+                else ""
+            ),
             "status": status,
         })
 
@@ -3068,6 +3127,60 @@ def movement_status_class(
         return "mv-neu"
 
     return "mv-na"
+
+
+
+# ==========================================================
+# Tier & Period Presentation Helpers
+# ==========================================================
+
+def tier_presentation(
+    tier_value: Any,
+) -> Tuple[str, str, str]:
+    """Return (label, pill_class, card_class) for a tier."""
+    tier = normalize_tier(tier_value)
+
+    mapping = {
+        "OFFICIAL": (
+            "🟢 官方推薦",
+            "tier-pill-official",
+            "rec-card-official",
+        ),
+        "ALTERNATIVE": (
+            "⚡ 進取選擇",
+            "tier-pill-alternative",
+            "rec-card-alternative",
+        ),
+        "CORRECT_SCORE": (
+            "🎯 波膽",
+            "tier-pill-score",
+            "rec-card-score",
+        ),
+    }
+
+    return mapping.get(
+        tier,
+        ("📌 其他", "tier-pill-alternative", "rec-card-alternative"),
+    )
+
+
+def period_presentation(
+    period_value: Any,
+) -> Tuple[str, str]:
+    """Return (label, pill_class) for a period."""
+    period = clean_upper(period_value)
+
+    mapping = {
+        "FT": ("FT 全場", "period-ft"),
+        "HT": ("HT 半場", "period-ht"),
+        "2H": ("2H 下半場", "period-2h"),
+    }
+
+    return mapping.get(
+        period,
+        (period or "FT", "period-ft"),
+    )
+
 
 
 def robustness_status_chinese(
