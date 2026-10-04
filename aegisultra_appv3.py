@@ -26,7 +26,7 @@ APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
 )
 
 VISIBLE_STATUSES = {
@@ -2129,11 +2129,44 @@ def load_portal_data() -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
 ]:
+    users_df = fetch_sheet("users")
+    matches_df = fetch_sheet("matches")
+    recommendations_df = fetch_sheet("recommendations")
+    analysis_df = fetch_sheet("analysis")
+
+    # ---- Diagnostic logging ----
+    if "_diagnose" not in st.session_state:
+        st.session_state["_diagnose"] = True
+        with st.expander("🔧 系統診斷（首次載入顯示）", expanded=False):
+            st.caption("以下資訊僅用於排查資料讀取問題：")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("matches 表", f"{len(matches_df)} 行")
+                if not matches_df.empty:
+                    st.caption(f"欄位: {list(matches_df.columns)[:5]}...")
+            with col2:
+                st.metric("recommendations 表", f"{len(recommendations_df)} 行")
+            with col3:
+                st.metric("analysis 表", f"{len(analysis_df)} 行")
+                if not analysis_df.empty:
+                    st.caption(f"欄位: {list(analysis_df.columns)}")
+                    # Show first match_id
+                    if "match_id" in analysis_df.columns:
+                        st.caption(
+                            f"首筆 match_id: {analysis_df['match_id'].iloc[0]}"
+                        )
+                    else:
+                        st.error("⚠️ analysis 表沒有 match_id 欄位！")
+                else:
+                    st.error("⚠️ analysis 表是空的！")
+            with col4:
+                st.metric("users 表", f"{len(users_df)} 行")
+
     return (
-        fetch_sheet("users"),
-        fetch_sheet("matches"),
-        fetch_sheet("recommendations"),
-        fetch_sheet("analysis"),
+        users_df,
+        matches_df,
+        recommendations_df,
+        analysis_df,
     )
 
 
