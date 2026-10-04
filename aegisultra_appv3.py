@@ -1767,12 +1767,72 @@ def load_portal_data() -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
 ]:
     return (
         fetch_sheet("users"),
         fetch_sheet("matches"),
         fetch_sheet("recommendations"),
+        fetch_sheet("analysis"),
     )
+
+
+# ============================================================
+# V3: Parse the analysis sheet into a lookup-friendly form.
+# Each row stores JSON blobs for audits / stress / priors / CS.
+# ============================================================
+
+JSON_ANALYSIS_FIELDS = [
+    "movement_audits_json",
+    "family_out_json",
+    "stress_audits_json",
+    "prior_comparison_json",
+    "correct_scores_json",
+]
+
+
+def prepare_analysis(
+    raw_analysis_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Normalize the analysis sheet and parse its JSON blob columns."""
+    if raw_analysis_df is None or raw_analysis_df.empty:
+        return pd.DataFrame()
+
+    dataframe = raw_analysis_df.copy()
+
+    for field in JSON_ANALYSIS_FIELDS:
+        if field not in dataframe.columns:
+            dataframe[field] = ""
+
+    return dataframe
+
+
+def parse_analysis_json(
+    value,
+    default=None,
+):
+    """Safely parse a JSON string from an analysis cell."""
+    if default is None:
+        default = []
+
+    if value is None:
+        return default
+
+    text = clean_text(value)
+
+    if not text:
+        return default
+
+    try:
+        decoded = json.loads(text)
+
+    except Exception:
+        return default
+
+    if decoded is None:
+        return default
+
+    return decoded
 
 
 # ============================================================
@@ -4092,13 +4152,11 @@ if "my_pick_ids" not in st.session_state:
     st.session_state.my_pick_ids = []
 
 
-users_df, raw_matches_df, raw_recommendations_df = (
+users_df, raw_matches_df, raw_recommendations_df, raw_analysis_df = (
     load_portal_data()
 )
 
 parlay_corner_df = fetch_sheet("parlay_corner")
-
-raw_analysis_df = fetch_sheet("analysis")
 
 
 # ============================================================
