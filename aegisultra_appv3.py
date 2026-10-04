@@ -1077,6 +1077,320 @@ st.markdown(
         border-color: rgba(255, 255, 255, 0.08);
     }
 
+    /* ============================================================
+       V3.1 Premium visual upgrade
+       - Glassmorphism cards with hover lift
+       - Animated gradient borders
+       - Glow effects on movement chips
+       - Smooth reveal animations
+       ============================================================ */
+
+    @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+    }
+
+    @keyframes glow-pulse {
+        0%, 100% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.25); }
+        50% { box-shadow: 0 0 24px rgba(34, 197, 94, 0.55); }
+    }
+
+    @keyframes float-in {
+        from { opacity: 0; transform: translateY(14px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes border-flow {
+        0%   { --angle: 0deg; }
+        100% { --angle: 360deg; }
+    }
+
+    /* Hero / portal header */
+    .portal-hero {
+        position: relative;
+        background: linear-gradient(
+            135deg,
+            rgba(17, 24, 39, 0.97) 0%,
+            rgba(30, 41, 59, 0.94) 45%,
+            rgba(15, 23, 42, 0.97) 100%
+        );
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        box-shadow:
+            0 20px 60px -20px rgba(0, 0, 0, 0.7),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        overflow: hidden;
+    }
+
+    .portal-hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+            900px circle at 85% 15%,
+            rgba(59, 130, 246, 0.10),
+            transparent 55%
+        ),
+        radial-gradient(
+            700px circle at 10% 90%,
+            rgba(16, 185, 129, 0.08),
+            transparent 55%
+        );
+        pointer-events: none;
+    }
+
+    .portal-title {
+        background: linear-gradient(
+            100deg,
+            #f8fafc 10%,
+            #93c5fd 45%,
+            #6ee7b7 80%
+        );
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.02em;
+    }
+
+    /* Recommendation cards */
+    .recommendation-card {
+        position: relative;
+        background: linear-gradient(
+            155deg,
+            rgba(30, 41, 59, 0.72),
+            rgba(15, 23, 42, 0.82)
+        );
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        transition:
+            transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+            box-shadow 220ms ease,
+            border-color 220ms ease;
+        animation: float-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .recommendation-card:hover {
+        transform: translateY(-4px);
+        border-color: rgba(59, 130, 246, 0.35);
+        box-shadow:
+            0 18px 40px -18px rgba(0, 0, 0, 0.75),
+            0 0 0 1px rgba(59, 130, 246, 0.12);
+    }
+
+    /* Tier accents with glow */
+    .recommendation-card.tier-official {
+        border-left: 3px solid #22c55e;
+    }
+    .recommendation-card.tier-official:hover {
+        box-shadow: 0 18px 40px -18px rgba(34, 197, 94, 0.45);
+    }
+
+    .recommendation-card.tier-alternative {
+        border-left: 3px solid #38bdf8;
+    }
+
+    .recommendation-card.tier-correct-score {
+        border-left: 3px solid #c084fc;
+    }
+
+    .recommendation-card.tier-correct-score:hover {
+        box-shadow: 0 18px 40px -18px rgba(192, 132, 252, 0.45);
+    }
+
+    /* Movement chips with glow */
+    .stat-chip.movement-S,
+    .stat-chip.movement-supported {
+        background: rgba(34, 197, 94, 0.14);
+        border-color: rgba(34, 197, 94, 0.45);
+        color: #86efac;
+        animation: glow-pulse 2.6s ease-in-out infinite;
+    }
+
+    .stat-chip.movement-C,
+    .stat-chip.movement-conflicted {
+        background: rgba(239, 68, 68, 0.13);
+        border-color: rgba(239, 68, 68, 0.45);
+        color: #fca5a5;
+    }
+
+    .stat-chip.movement-N,
+    .stat-chip.movement-neutral {
+        background: rgba(148, 163, 184, 0.12);
+        border-color: rgba(148, 163, 184, 0.3);
+        color: #cbd5e1;
+    }
+
+    .stat-chip.movement-R,
+    .stat-chip.movement-reversed {
+        background: rgba(249, 115, 22, 0.14);
+        border-color: rgba(249, 115, 22, 0.45);
+        color: #fdba74;
+    }
+
+    /* Shimmer on heavy picks */
+    .heavy-badge {
+        background: linear-gradient(
+            100deg,
+            rgba(251, 191, 36, 0.2) 0%,
+            rgba(251, 146, 60, 0.2) 50%,
+            rgba(251, 191, 36, 0.2) 100%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 3.5s ease infinite;
+        border-color: rgba(251, 191, 36, 0.5);
+        color: #fde68a;
+    }
+
+    /* Match heading */
+    .match-heading {
+        background: linear-gradient(
+            155deg,
+            rgba(30, 41, 59, 0.6),
+            rgba(15, 23, 42, 0.78)
+        );
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+
+    .match-name {
+        font-weight: 700;
+        letter-spacing: -0.01em;
+    }
+
+    /* Score cards (correct score reference) */
+    .score-card {
+        background: linear-gradient(
+            155deg,
+            rgba(124, 58, 237, 0.14),
+            rgba(76, 29, 149, 0.1)
+        );
+        border: 1px solid rgba(192, 132, 252, 0.28);
+        transition:
+            transform 200ms ease,
+            box-shadow 200ms ease;
+    }
+
+    .score-card:hover {
+        transform: translateY(-3px) scale(1.015);
+        box-shadow: 0 14px 30px -14px rgba(192, 132, 252, 0.55);
+        border-color: rgba(192, 132, 252, 0.55);
+    }
+
+    /* Sidebar polish */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(
+            180deg,
+            rgba(15, 23, 42, 0.98),
+            rgba(9, 14, 30, 0.99)
+        );
+        border-right: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    section[data-testid="stSidebar"] .stMarkdown h1,
+    section[data-testid="stSidebar"] .stMarkdown h2,
+    section[data-testid="stSidebar"] .stMarkdown h3 {
+        letter-spacing: -0.01em;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        background: rgba(30, 41, 59, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 16px;
+        padding: 0.75rem 1rem;
+        transition: background 200ms ease, transform 200ms ease;
+    }
+
+    [data-testid="stMetric"]:hover {
+        background: rgba(30, 41, 59, 0.62);
+        transform: translateY(-2px);
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: rgba(203, 213, 225, 0.78);
+        font-size: 0.78rem;
+        letter-spacing: 0.02em;
+    }
+
+    [data-testid="stMetricValue"] {
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+
+    /* Expander panels (analysis) */
+    [data-testid="stExpander"] {
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 14px;
+        overflow: hidden;
+        transition: border-color 200ms ease;
+    }
+
+    [data-testid="stExpander"]:hover {
+        border-color: rgba(59, 130, 246, 0.28);
+    }
+
+    [data-testid="stExpander"] summary {
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        border-radius: 12px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        transition: transform 150ms ease, box-shadow 150ms ease;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-1px);
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 6px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 10px 10px 0 0;
+        letter-spacing: -0.01em;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.6);
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: rgba(100, 116, 139, 0.4);
+        border-radius: 8px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(100, 116, 139, 0.65);
+    }
+
+    /* Login screen upgrade */
+    [data-testid="stForm"] {
+        background: rgba(30, 41, 59, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        padding: 1.5rem;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+
+    /* Fade-in for the whole app body on load */
+    [data-testid="stAppViewContainer"] {
+        animation: float-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
     @media (max-width: 700px) {
         .block-container {
             padding-left: 0.78rem;
@@ -4672,9 +4986,10 @@ if navigation == "⚽ Match Centre":
     movement_count = int(
         active_recommendations[
             "movement_verdict"
-            .map(clean_upper)
-            .ne("")
-        ].sum()
+        ]
+        .map(clean_upper)
+        .ne("")
+        .sum()
     )
 
     first, second, third, fourth, fifth = (
