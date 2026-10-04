@@ -26,7 +26,7 @@ APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
 )
 
 VISIBLE_STATUSES = {
@@ -2193,6 +2193,22 @@ def parse_analysis_json(
         return default
 
     return decoded
+
+
+def parse_json_field(
+    value,
+    default=None,
+):
+    """Alias for parse_analysis_json.
+
+    Exists because several render helpers were originally
+    written against this shorter name. Both names resolve
+    to the same implementation.
+    """
+    return parse_analysis_json(
+        value,
+        default=default,
+    )
 
 
 # ============================================================
