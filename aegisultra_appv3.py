@@ -26,7 +26,7 @@ APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
 )
 
 VISIBLE_STATUSES = {
@@ -2143,24 +2143,73 @@ def load_portal_data() -> Tuple[
             with col1:
                 st.metric("matches 表", f"{len(matches_df)} 行")
                 if not matches_df.empty:
-                    st.caption(f"欄位: {list(matches_df.columns)[:5]}...")
+                    st.caption(f"欄位: {list(matches_df.columns)[:8]}")
+                    if "match_id" in matches_df.columns:
+                        ids = matches_df["match_id"].dropna().astype(str).tolist()
+                        st.caption(f"match_id 範例: {ids[:3]}")
+                    else:
+                        st.error("⚠️ matches 表沒有 match_id 欄位！")
+                else:
+                    st.error("⚠️ matches 表是空的！")
             with col2:
                 st.metric("recommendations 表", f"{len(recommendations_df)} 行")
+                if not recommendations_df.empty:
+                    if "match_id" in recommendations_df.columns:
+                        ids = recommendations_df["match_id"].dropna().astype(str).unique().tolist()
+                        st.caption(f"match_id 範例: {ids[:3]}")
+                    else:
+                        st.error("⚠️ recommendations 表沒有 match_id 欄位！")
             with col3:
                 st.metric("analysis 表", f"{len(analysis_df)} 行")
                 if not analysis_df.empty:
                     st.caption(f"欄位: {list(analysis_df.columns)}")
-                    # Show first match_id
                     if "match_id" in analysis_df.columns:
-                        st.caption(
-                            f"首筆 match_id: {analysis_df['match_id'].iloc[0]}"
-                        )
+                        ids = analysis_df["match_id"].dropna().astype(str).tolist()
+                        st.caption(f"match_id 範例: {ids[:3]}")
                     else:
                         st.error("⚠️ analysis 表沒有 match_id 欄位！")
                 else:
                     st.error("⚠️ analysis 表是空的！")
             with col4:
                 st.metric("users 表", f"{len(users_df)} 行")
+
+            # ---- Match ID 交叉比對 ----
+            st.markdown("---")
+            st.markdown("**Match ID 交叉比對：**")
+
+            if not matches_df.empty and not analysis_df.empty:
+                if "match_id" in matches_df.columns and "match_id" in analysis_df.columns:
+                    match_ids_from_matches = set(
+                        matches_df["match_id"].dropna().astype(str).str.strip().str.lower()
+                    )
+                    match_ids_from_analysis = set(
+                        analysis_df["match_id"].dropna().astype(str).str.strip().str.lower()
+                    )
+                    overlap = match_ids_from_matches & match_ids_from_analysis
+
+                    st.caption(f"matches 表 match_id 數量: {len(match_ids_from_matches)}")
+                    st.caption(f"analysis 表 match_id 數量: {len(match_ids_from_analysis)}")
+                    st.caption(f"兩邊有交集的 match_id 數量: {len(overlap)}")
+
+                    if overlap:
+                        st.success(f"✅ 有 {len(overlap)} 個 match_id 對得上：{list(overlap)[:5]}")
+                    else:
+                        st.error("❌ 沒有任何 match_id 對得上！這就是分析面板不顯示的原因。")
+                        st.caption(f"matches 表 ID 範例: {list(match_ids_from_matches)[:5]}")
+                        st.caption(f"analysis 表 ID 範例: {list(match_ids_from_analysis)[:5]}")
+                else:
+                    st.error("⚠️ 其中一張表缺少 match_id 欄位")
+            else:
+                st.warning("matches 表或 analysis 表為空，無法比對")
+
+            # ---- Debug toggle ----
+            st.markdown("---")
+            st.markdown("**Debug 開關：**")
+            st.session_state["_debug_analysis"] = st.checkbox(
+                "在賽事詳情中顯示 analysis 載入狀態",
+                value=False,
+                key="debug_analysis_toggle",
+            )
 
     return (
         users_df,
@@ -4333,6 +4382,18 @@ def render_match(
     match_id = clean_identifier(
         match.get("match_id")
     )
+
+    # ---- DEBUG: 顯示 analysis 是否載入成功 ----
+    if st.session_state.get("_debug_analysis", False):
+        if analysis is None:
+            st.warning(
+                f"⚠️ match_id={match_id} → analysis 為 None"
+            )
+        else:
+            st.success(
+                f"✅ match_id={match_id} → analysis 已載入 "
+                f"({len(analysis)} 欄位)"
+            )
 
     match_recommendations = (
         recommendations[
