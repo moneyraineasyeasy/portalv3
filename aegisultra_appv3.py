@@ -2129,87 +2129,27 @@ def load_portal_data() -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
 ]:
-    users_df = fetch_sheet("users")
-    matches_df = fetch_sheet("matches")
-    recommendations_df = fetch_sheet("recommendations")
-    analysis_df = fetch_sheet("analysis")
-
-    # ---- Diagnostic logging ----
-    if "_diagnose" not in st.session_state:
-        st.session_state["_diagnose"] = True
-        with st.expander("🔧 系統診斷（首次載入顯示）", expanded=False):
-            st.caption("以下資訊僅用於排查資料讀取問題：")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("matches 表", f"{len(matches_df)} 行")
-                if not matches_df.empty:
-                    st.caption(f"欄位: {list(matches_df.columns)[:8]}")
-                    if "match_id" in matches_df.columns:
-                        ids = matches_df["match_id"].dropna().astype(str).tolist()
-                        st.caption(f"match_id 範例: {ids[:3]}")
-                    else:
-                        st.error("⚠️ matches 表沒有 match_id 欄位！")
-                else:
-                    st.error("⚠️ matches 表是空的！")
-            with col2:
-                st.metric("recommendations 表", f"{len(recommendations_df)} 行")
-                if not recommendations_df.empty:
-                    if "match_id" in recommendations_df.columns:
-                        ids = recommendations_df["match_id"].dropna().astype(str).unique().tolist()
-                        st.caption(f"match_id 範例: {ids[:3]}")
-                    else:
-                        st.error("⚠️ recommendations 表沒有 match_id 欄位！")
-            with col3:
-                st.metric("analysis 表", f"{len(analysis_df)} 行")
-                if not analysis_df.empty:
-                    st.caption(f"欄位: {list(analysis_df.columns)}")
-                    if "match_id" in analysis_df.columns:
-                        ids = analysis_df["match_id"].dropna().astype(str).tolist()
-                        st.caption(f"match_id 範例: {ids[:3]}")
-                    else:
-                        st.error("⚠️ analysis 表沒有 match_id 欄位！")
-                else:
-                    st.error("⚠️ analysis 表是空的！")
-            with col4:
-                st.metric("users 表", f"{len(users_df)} 行")
-
-            # ---- Match ID 交叉比對 ----
-            st.markdown("---")
-            st.markdown("**Match ID 交叉比對：**")
-
-            if not matches_df.empty and not analysis_df.empty:
-                if "match_id" in matches_df.columns and "match_id" in analysis_df.columns:
-                    match_ids_from_matches = set(
-                        matches_df["match_id"].dropna().astype(str).str.strip().str.lower()
-                    )
-                    match_ids_from_analysis = set(
-                        analysis_df["match_id"].dropna().astype(str).str.strip().str.lower()
-                    )
-                    overlap = match_ids_from_matches & match_ids_from_analysis
-
-                    st.caption(f"matches 表 match_id 數量: {len(match_ids_from_matches)}")
-                    st.caption(f"analysis 表 match_id 數量: {len(match_ids_from_analysis)}")
-                    st.caption(f"兩邊有交集的 match_id 數量: {len(overlap)}")
-
-                    if overlap:
-                        st.success(f"✅ 有 {len(overlap)} 個 match_id 對得上：{list(overlap)[:5]}")
-                    else:
-                        st.error("❌ 沒有任何 match_id 對得上！這就是分析面板不顯示的原因。")
-                        st.caption(f"matches 表 ID 範例: {list(match_ids_from_matches)[:5]}")
-                        st.caption(f"analysis 表 ID 範例: {list(match_ids_from_analysis)[:5]}")
-                else:
-                    st.error("⚠️ 其中一張表缺少 match_id 欄位")
-            else:
-                st.warning("matches 表或 analysis 表為空，無法比對")
-
-            # ---- Debug toggle ----
-            st.markdown("---")
-            st.markdown("**Debug 開關：**")
-            st.session_state["_debug_analysis"] = st.checkbox(
-                "在賽事詳情中顯示 analysis 載入狀態",
-                value=False,
-                key="debug_analysis_toggle",
+    # ---- 每張表獨立 try-except，避免一張表出錯拖累全部 ----
+    def safe_fetch(table_name: str) -> pd.DataFrame:
+        try:
+            df = fetch_sheet(table_name)
+            return df
+        except Exception as exc:
+            st.sidebar.error(
+                f"❌ 讀取 `{table_name}` 失敗：{exc}"
             )
+            return pd.DataFrame()
+
+    users_df = safe_fetch("users")
+    matches_df = safe_fetch("matches")
+    recommendations_df = safe_fetch("recommendations")
+    analysis_df = safe_fetch("analysis")
+
+    # ---- 寫入 session_state，讓 sidebar 可以讀取 ----
+    st.session_state["_diag_matches"] = matches_df
+    st.session_state["_diag_recommendations"] = recommendations_df
+    st.session_state["_diag_analysis"] = analysis_df
+    st.session_state["_diag_users"] = users_df
 
     return (
         users_df,
@@ -2217,6 +2157,66 @@ def load_portal_data() -> Tuple[
         recommendations_df,
         analysis_df,
     )
+
+
+def render_diagnostics() -> None:
+    """在 sidebar 底部顯示系統診斷資訊（一定看得到）。"""
+    with st.sidebar:
+        st.markdown("---")
+        with st.expander("🔧 系統診斷", expanded=False):
+            matches_df = st.session_state.get(
+                "_diag_matches", pd.DataFrame()
+            )
+            recommendations_df = st.session_state.get(
+                "_diag_recommendations", pd.DataFrame()
+            )
+            analysis_df = st.session_state.get(
+                "_diag_analysis", pd.DataFrame()
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("matches", f"{len(matches_df)} 行")
+                st.metric("analysis", f"{len(analysis_df)} 行")
+            with col2:
+                st.metric("recommendations", f"{len(recommendations_df)} 行")
+
+            # match_id 比對
+            if not matches_df.empty and not analysis_df.empty:
+                if (
+                    "match_id" in matches_df.columns
+                    and "match_id" in analysis_df.columns
+                ):
+                    ids_m = set(
+                        matches_df["match_id"]
+                        .dropna().astype(str)
+                        .str.strip().str.lower()
+                    )
+                    ids_a = set(
+                        analysis_df["match_id"]
+                        .dropna().astype(str)
+                        .str.strip().str.lower()
+                    )
+                    overlap = ids_m & ids_a
+                    st.caption(
+                        f"matches match_id: {sorted(ids_m)[:3]}"
+                    )
+                    st.caption(
+                        f"analysis match_id: {sorted(ids_a)[:3]}"
+                    )
+                    if overlap:
+                        st.success(f"✅ 對上 {len(overlap)} 個")
+                    else:
+                        st.error("❌ 0 個對上")
+                else:
+                    st.error("⚠️ 某張表缺少 match_id 欄位")
+
+            # debug toggle
+            st.session_state["_debug_analysis"] = st.checkbox(
+                "賽事詳情顯示 analysis 狀態",
+                value=False,
+                key="debug_analysis_toggle",
+            )
 
 
 # ============================================================
@@ -5187,6 +5187,9 @@ with st.sidebar:
         st.session_state.portal_user = {}
         clear_all_picks()
         st.rerun()
+
+    # ---- System diagnostics (always visible in sidebar) ----
+    render_diagnostics()
 
 
 # ============================================================
