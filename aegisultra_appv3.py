@@ -1421,6 +1421,46 @@ st.markdown(
             padding: 1rem;
         }
     }
+
+    /* Result badges */
+    .result-badge {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        margin-left: 0.4rem;
+    }
+
+    .result-win {
+        background: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .result-loss {
+        background: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .result-push {
+        background: rgba(234, 179, 8, 0.2);
+        color: #facc15;
+        border: 1px solid rgba(234, 179, 8, 0.4);
+    }
+
+    .result-void {
+        background: rgba(148, 163, 184, 0.2);
+        color: #94a3b8;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+    }
+
+    .result-pending {
+        background: rgba(100, 116, 139, 0.2);
+        color: #64748b;
+        border: 1px solid rgba(100, 116, 139, 0.4);
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -3180,6 +3220,76 @@ def period_presentation(
         period,
         (period or "FT", "period-ft"),
     )
+
+
+
+
+def result_badge(
+    result_value: Any,
+) -> str:
+    """Render a result badge for a recommendation."""
+    result = clean_upper(result_value)
+
+    if not result or result == "PENDING":
+        return ""
+
+    mapping = {
+        "WIN": (
+            '<span class="result-badge result-win">'
+            "✅ 命中"
+            "</span>"
+        ),
+        "LOSS": (
+            '<span class="result-badge result-loss">'
+            "❌ 未中"
+            "</span>"
+        ),
+        "PUSH": (
+            '<span class="result-badge result-push">'
+            "🟡 走盤"
+            "</span>"
+        ),
+        "VOID": (
+            '<span class="result-badge result-void">'
+            "⚪ 作廢"
+            "</span>"
+        ),
+        "HALF_WIN": (
+            '<span class="result-badge result-win">'
+            "✅ 半贏"
+            "</span>"
+        ),
+        "HALF_LOSS": (
+            '<span class="result-badge result-loss">'
+            "❌ 半輸"
+            "</span>"
+        ),
+    }
+
+    return mapping.get(
+        result,
+        f'<span class="result-badge result-pending">{result}</span>',
+    )
+
+
+def format_ev(
+    value: Any,
+    decimals: int = 2,
+) -> str:
+    """Format expected value as percentage."""
+    number = safe_float(value)
+
+    if number is None:
+        return "—"
+
+    # If value is in basis points or > 1, normalize
+    if abs(number) > 1 and abs(number) <= 100:
+        number /= 100
+
+    if number > 0:
+        return f"+{number * 100:.{decimals}f}%"
+
+    return f"{number * 100:.{decimals}f}%"
 
 
 
