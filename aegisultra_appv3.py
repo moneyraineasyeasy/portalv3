@@ -1,1465 +1,350 @@
+# aegisultra_app.py
+#
+# AEGIS ULTRA V3 Streamlit Command Center
+#
+# Compatible with:
+# - aegisultra_enginev2.py
+# - aegisultra_enginev3.py
+#
+# Important:
+# CORRECT_SCORE is not an engine input market. Correct-score
+# references are generated automatically from the FT model.
+
 from __future__ import annotations
 
 import hashlib
-import hmac
 import html
+import importlib
+import json
 import math
 import os
-import re
-import textwrap
-import time
+import traceback
+import urllib.error
+import urllib.request
+from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import parse_qs, quote, urlparse
+from typing import Any, Dict, List, Optional
+
+os.environ["ARROW_DEFAULT_MEMORY_POOL"] = "system"
 
 import pandas as pd
 import streamlit as st
 
+import aegisultra_enginev2 as aegis_v2
+import aegisultra_enginev3 as aegis
+
 
 # ============================================================
-# AEGIS ULTRA V2 VIP MATCH CENTRE
+# 1. Reload engine modules
 # ============================================================
 
-os.environ["ARROW_DEFAULT_MEMORY_POOL"] = "system"
+importlib.invalidate_caches()
 
-APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
-APP_VERSION = "4.0.0"
-
-DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+aegis_v2 = importlib.reload(
+    aegis_v2
 )
 
-VISIBLE_STATUSES = {
-    "published",
-    "ended",
+aegis = importlib.reload(
+    aegis
+)
+
+
+APP_NAME = "AEGIS ULTRA"
+APP_VERSION = "3.1.0"
+
+ENGINE_NAME = getattr(
+    aegis,
+    "ENGINE_NAME",
+    "Aegis Ultra Engine",
+)
+
+ENGINE_VERSION = getattr(
+    aegis,
+    "ENGINE_VERSION",
+    "Unknown",
+)
+
+DEFAULT_API_URL = (
+    "https://script.google.com/macros/s/"
+    "AKfycbwhceZ9-Z-n4R7U-ctJsLrmZuSiy98MtCPgUIw26ZOM9tv2Y5WPt7af56mJJ8M4pbqfww/"
+    "exec"
+)
+
+PERIOD_ORDER = {
+    "FT": 0,
+    "HT": 1,
 }
 
-TIER_ORDER = {
-    "OFFICIAL": 0,
-    "ALTERNATIVE": 1,
-    "CORRECT_SCORE": 2,
+SUPPORTED_INPUT_MARKETS = {
+    "1X2",
+    "AH",
+    "OU",
+    "HHAD",
+    "TEAM_OU",
 }
 
-RECOMMENDATION_DEFAULTS: Dict[str, Any] = {
-    "rec_id": "",
-    "match_id": "",
-    "tier": "ALTERNATIVE",
-    "rank": 999,
-    "rec_title": "",
-    "period": "FT",
-    "market": "",
-    "market_scope": "",
-    "selection": "",
-    "line": None,
-    "odds": None,
-    "conservative_hit": None,
-    "median_hit": None,
-    "nonloss_probability": None,
-    "full_loss_probability": None,
-    "fair_odds": None,
-    "edge": None,
-    "expected_value": None,
-    "stars": 3,
-    "price_status": "",
-    "commentary": "",
-    "is_heavy": False,
-    "conflict_ids": "",
-    "compatibility_group": "",
-    "status": "",
-    "result": "",
-    # V3.1 movement / robustness fields
-    "movement_verdict": "",
-    "movement_strength": "",
-    "movement_agreement_ratio": None,
-    "movement_probability_change_pp": None,
-    "family_out_status": "",
-}
 
-MATCH_DEFAULTS: Dict[str, Any] = {
-    "match_id": "",
-    "match_name": "",
-    "home_team": "",
-    "away_team": "",
-    "competition": "",
-    "kickoff": "",
-    "status": "",
-    "model_direction": "",
-    "model_summary": "",
-    "top_scores": "",
-    "final_score": "",
-}
-
+# ============================================================
+# 2. Page configuration
+# ============================================================
 
 st.set_page_config(
     page_title=APP_NAME,
-    page_icon="🏆",
+    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="collapsed",
-    menu_items={
-        "About": (
-            "Aegis Ultra V2 VIP Match Centre\n\n"
-            "Private member portal."
-        ),
-    },
 )
 
 
 # ============================================================
-# 1. HTML rendering
-# ============================================================
-
-def render_html(markup: str) -> None:
-    st.html(textwrap.dedent(markup).strip())
-
-
-# ============================================================
-# 2. Premium visual system
+# 3. Styling
 # ============================================================
 
 st.markdown(
     """
     <style>
-    * {
-        box-sizing: border-box;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-    }
-
     :root {
-        --void: #04060c;
-        --obsidian: #080b14;
-        --panel: rgba(16, 22, 37, 0.78);
-        --panel-soft: rgba(255, 255, 255, 0.042);
-        --border: rgba(255, 255, 255, 0.085);
-        --border-strong: rgba(255, 255, 255, 0.14);
-        --gold: #f59e0b;
-        --gold-light: #fde68a;
-        --emerald: #10b981;
-        --cyan: #38bdf8;
-        --violet: #8b5cf6;
-        --rose: #f43f5e;
-        --orange: #f97316;
-        --lime: #84cc16;
-        --muted: #94a3b8;
-    }
-
-    html {
-        scroll-behavior: smooth;
-    }
-
-    body {
-        background: var(--void);
+        --bg: #080a11;
+        --surface: rgba(255,255,255,0.045);
+        --border: rgba(255,255,255,0.09);
+        --green: #32d9a1;
+        --blue: #7388ff;
+        --purple: #ae72ff;
+        --amber: #ffbd59;
+        --red: #ff6577;
     }
 
     .stApp {
-        color: #f8fafc;
         background:
             radial-gradient(
-                circle at 7% 0%,
-                rgba(37, 79, 205, 0.26),
+                circle at 10% 5%,
+                rgba(81,102,255,0.15),
+                transparent 29%
+            ),
+            radial-gradient(
+                circle at 90% 2%,
+                rgba(172,81,255,0.12),
                 transparent 26%
-            ),
-            radial-gradient(
-                circle at 96% 4%,
-                rgba(130, 55, 208, 0.18),
-                transparent 24%
-            ),
-            radial-gradient(
-                circle at 52% 105%,
-                rgba(16, 185, 129, 0.09),
-                transparent 32%
             ),
             linear-gradient(
                 180deg,
-                #03050a 0%,
-                #080c16 45%,
-                #03050a 100%
+                #090b13 0%,
+                #0d1019 48%,
+                #080a11 100%
             );
     }
 
     .block-container {
-        max-width: 1480px;
-        padding-top: 1.1rem;
-        padding-bottom: 5rem;
+        max-width: 1540px;
+        padding-top: 1.25rem;
+        padding-bottom: 4rem;
     }
 
     [data-testid="stSidebar"] {
         background:
-            radial-gradient(
-                circle at 20% 0%,
-                rgba(56, 88, 220, 0.13),
-                transparent 30%
-            ),
             linear-gradient(
                 180deg,
-                rgba(12, 16, 28, 0.995),
-                rgba(4, 7, 13, 0.995)
+                rgba(16,19,31,0.99),
+                rgba(8,10,17,0.99)
             );
-        border-right: 1px solid rgba(255, 255, 255, 0.075);
+        border-right: 1px solid var(--border);
     }
 
-    [data-testid="stSidebar"] .block-container {
-        padding-top: 1.25rem;
-    }
-
-    ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-        background: transparent;
-    }
-
-    ::-webkit-scrollbar-thumb {
-        background: #263249;
-        border-radius: 999px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-        background: #3a4967;
-    }
-
-    /* Hero */
-
-    .portal-hero {
-        position: relative;
-        overflow: hidden;
-        padding: 2.35rem 2.5rem;
-        margin-bottom: 1.4rem;
-        border-radius: 30px;
-        background:
-            linear-gradient(
-                125deg,
-                rgba(24, 36, 78, 0.96),
-                rgba(46, 28, 78, 0.89),
-                rgba(8, 55, 62, 0.79)
-            );
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        box-shadow:
-            0 34px 110px rgba(0, 0, 0, 0.46),
-            inset 0 1px 0 rgba(255, 255, 255, 0.10);
-        backdrop-filter: blur(22px);
-        -webkit-backdrop-filter: blur(22px);
-    }
-
-    .portal-hero::before {
-        content: "";
-        position: absolute;
-        width: 390px;
-        height: 390px;
-        top: -290px;
-        right: -80px;
-        border-radius: 50%;
-        background: rgba(245, 158, 11, 0.34);
-        filter: blur(30px);
-    }
-
-    .portal-hero::after {
-        content: "";
-        position: absolute;
-        width: 270px;
-        height: 270px;
-        bottom: -210px;
-        left: 34%;
-        border-radius: 50%;
-        background: rgba(56, 189, 248, 0.18);
-        filter: blur(38px);
-    }
-
-    .portal-eyebrow {
-        position: relative;
-        z-index: 2;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        padding: 0.42rem 0.85rem;
-        margin-bottom: 0.95rem;
-        border-radius: 999px;
-        color: #fde68a;
-        background: rgba(245, 158, 11, 0.13);
-        border: 1px solid rgba(245, 158, 11, 0.34);
-        font-size: 0.74rem;
-        font-weight: 950;
-        letter-spacing: 0.11em;
-        text-transform: uppercase;
-    }
-
-    .portal-title {
-        position: relative;
-        z-index: 2;
-        margin: 0;
-        font-size: clamp(2.3rem, 6vw, 3.35rem);
-        line-height: 1.02;
-        font-weight: 950;
-        letter-spacing: -0.06em;
-        background:
-            linear-gradient(
-                135deg,
-                #ffffff 15%,
-                #fff7d6 48%,
-                #fbbf24 100%
-            );
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    
-    .portal-trophy {
-        background: none;
-        color: initial;
-        -webkit-text-fill-color: initial;
-    }
-
-    .portal-subtitle {
-        position: relative;
-        z-index: 2;
-        max-width: 900px;
-        margin: 0.95rem 0 0;
-        color: rgba(255, 255, 255, 0.70);
-        font-size: 1.04rem;
-        line-height: 1.68;
-    }
-
-    .hero-feature-row {
-        position: relative;
-        z-index: 2;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.55rem;
-        margin-top: 1.15rem;
-    }
-
-    .hero-feature {
-        padding: 0.46rem 0.72rem;
-        border-radius: 999px;
-        color: #cbd5e1;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        font-size: 0.76rem;
-        font-weight: 800;
-    }
-
-    .live-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #34d399;
-        box-shadow: 0 0 14px #34d399;
-        animation: livePulse 1.8s infinite;
-    }
-
-    @keyframes livePulse {
-        0%, 100% {
-            opacity: 1;
-            transform: scale(1);
-        }
-
-        50% {
-            opacity: 0.45;
-            transform: scale(0.72);
-        }
-    }
-
-    /* Login */
-
-    .login-shell {
-        max-width: 650px;
-        margin: 2.1rem auto 1rem;
-        padding: 2.25rem;
-        border-radius: 28px;
-        background:
-            radial-gradient(
-                circle at 50% 0%,
-                rgba(245, 158, 11, 0.09),
-                transparent 38%
-            ),
-            linear-gradient(
-                145deg,
-                rgba(17, 24, 39, 0.96),
-                rgba(8, 12, 22, 0.91)
-            );
-        border: 1px solid rgba(255, 255, 255, 0.11);
-        box-shadow:
-            0 38px 115px rgba(0, 0, 0, 0.48),
-            inset 0 1px 0 rgba(255, 255, 255, 0.07);
-    }
-
-    .login-icon {
-        text-align: center;
-        font-size: 3.6rem;
-        filter: drop-shadow(0 0 24px rgba(245, 158, 11, 0.34));
-    }
-
-    .login-title {
-        margin-top: 0.5rem;
-        text-align: center;
-        color: white;
-        font-size: 1.85rem;
-        font-weight: 950;
-    }
-
-    .login-copy {
-        max-width: 460px;
-        margin: 0.6rem auto 0;
-        text-align: center;
-        color: #8290a4;
-        line-height: 1.6;
-    }
-
-    .login-security {
-        margin-top: 1rem;
-        padding: 0.72rem 0.9rem;
-        text-align: center;
-        border-radius: 12px;
-        color: #a7f3d0;
-        background: rgba(16, 185, 129, 0.075);
-        border: 1px solid rgba(16, 185, 129, 0.17);
-        font-size: 0.82rem;
-    }
-
-    /* Dashboard */
-
-    .welcome-card {
-        padding: 1.35rem 1.5rem;
-        margin-bottom: 1.3rem;
-        border-radius: 20px;
-        background:
-            linear-gradient(
-                120deg,
-                rgba(245, 158, 11, 0.115),
-                rgba(255, 255, 255, 0.035)
-            );
-        border: 1px solid rgba(245, 158, 11, 0.22);
-        border-left: 4px solid var(--gold);
-        box-shadow: 0 15px 48px rgba(0, 0, 0, 0.24);
-    }
-
-    .welcome-name {
-        color: white;
-        font-size: 1.3rem;
-        font-weight: 950;
-    }
-
-    .welcome-name span {
-        color: #fbbf24;
-    }
-
-    .welcome-copy {
-        margin-top: 0.45rem;
-        color: #94a3b8;
-        line-height: 1.55;
-    }
-
-    .section-kicker {
-        margin-top: 1.2rem;
-        margin-bottom: 0.7rem;
-        color: rgba(255, 255, 255, 0.46);
-        font-size: 0.72rem;
-        font-weight: 950;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-    }
-
-    .empty-state {
-        padding: 2.3rem;
-        text-align: center;
-        border-radius: 22px;
-        color: #94a3b8;
-        background: rgba(255, 255, 255, 0.032);
-        border: 1px dashed rgba(255, 255, 255, 0.14);
-        line-height: 1.7;
-    }
-
-    /* Match header */
-
-    .match-heading {
-        padding: 1.2rem 1.3rem;
-        margin-bottom: 0.85rem;
-        border-radius: 19px;
-        background:
-            radial-gradient(
-                circle at 100% 0%,
-                rgba(56, 189, 248, 0.09),
-                transparent 35%
-            ),
-            linear-gradient(
-                120deg,
-                rgba(28, 39, 61, 0.88),
-                rgba(15, 23, 42, 0.64)
-            );
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        box-shadow: 0 13px 38px rgba(0, 0, 0, 0.21);
-    }
-
-    .match-heading-heavy {
-        background:
-            radial-gradient(
-                circle at 100% 0%,
-                rgba(245, 158, 11, 0.16),
-                transparent 36%
-            ),
-            linear-gradient(
-                120deg,
-                rgba(67, 38, 12, 0.58),
-                rgba(22, 29, 47, 0.82)
-            );
-        border-color: rgba(245, 158, 11, 0.28);
-    }
-
-    .match-heading-ended {
-        opacity: 0.84;
-        background: rgba(15, 23, 42, 0.52);
-    }
-
-    .match-name {
-        color: white;
-        font-size: 1.32rem;
-        font-weight: 950;
-        letter-spacing: -0.03em;
-    }
-
-    .match-meta {
-        margin-top: 0.42rem;
-        color: #8190a6;
-        font-size: 0.88rem;
-        line-height: 1.5;
-    }
-
-    .model-direction {
-        margin-top: 0.82rem;
-        padding: 0.75rem 0.9rem;
-        border-radius: 12px;
-        color: #bae6fd;
-        background: rgba(56, 189, 248, 0.075);
-        border: 1px solid rgba(56, 189, 248, 0.18);
-        line-height: 1.52;
-    }
-
-    .model-summary {
-        margin-top: 0.74rem;
-        color: #9ba9bc;
-        line-height: 1.6;
-    }
-
-    .score-summary {
-        margin-top: 0.6rem;
-        color: #c4b5fd;
-        line-height: 1.52;
-    }
-
-    /* Recommendation cards */
-
-    .recommendation-card {
-        position: relative;
-        overflow: hidden;
-        padding: 1.2rem 1.28rem;
-        margin: 0.8rem 0;
-        border-radius: 20px;
-        background:
-            linear-gradient(
-                145deg,
-                rgba(16, 24, 41, 0.91),
-                rgba(11, 17, 31, 0.70)
-            );
-        border: 1px solid rgba(255, 255, 255, 0.088);
-        box-shadow: 0 15px 46px rgba(0, 0, 0, 0.27);
-    }
-
-    .recommendation-card::after {
-        content: "";
-        position: absolute;
-        width: 130px;
-        height: 130px;
-        right: -88px;
-        top: -88px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.048);
-    }
-
-    .recommendation-card-official {
-        border-left: 4px solid var(--emerald);
-    }
-
-    .recommendation-card-alternative {
-        border-left: 4px solid var(--cyan);
-    }
-
-    .recommendation-card-score {
-        border-left: 4px solid var(--violet);
-    }
-
-    .recommendation-card-heavy {
-        border: 1px solid rgba(245, 158, 11, 0.41);
-        border-left: 4px solid var(--gold);
-        background:
-            radial-gradient(
-                circle at 100% 0%,
-                rgba(245, 158, 11, 0.14),
-                transparent 35%
-            ),
-            linear-gradient(
-                145deg,
-                rgba(64, 37, 12, 0.53),
-                rgba(15, 23, 42, 0.77)
-            );
-        box-shadow:
-            0 0 40px rgba(245, 158, 11, 0.11),
-            0 15px 46px rgba(0, 0, 0, 0.29);
-    }
-
-    .tier-pill,
-    .period-pill,
-    .heavy-pill {
-        position: relative;
-        z-index: 2;
-        display: inline-block;
-        padding: 0.31rem 0.64rem;
-        border-radius: 999px;
-        font-size: 0.67rem;
-        font-weight: 950;
-        letter-spacing: 0.065em;
-        text-transform: uppercase;
-    }
-
-    .tier-official {
-        color: #bbf7d0;
-        background: rgba(16, 185, 129, 0.14);
-        border: 1px solid rgba(16, 185, 129, 0.29);
-    }
-
-    .tier-alternative {
-        color: #bae6fd;
-        background: rgba(56, 189, 248, 0.12);
-        border: 1px solid rgba(56, 189, 248, 0.24);
-    }
-
-    .tier-score {
-        color: #ddd6fe;
-        background: rgba(139, 92, 246, 0.14);
-        border: 1px solid rgba(139, 92, 246, 0.28);
-    }
-
-    .period-pill {
-        margin-left: 0.38rem;
-        color: #cbd5e1;
-        background: rgba(148, 163, 184, 0.11);
-        border: 1px solid rgba(148, 163, 184, 0.20);
-    }
-
-    .period-ht {
-        color: #f0abfc;
-        background: rgba(217, 70, 239, 0.11);
-        border-color: rgba(217, 70, 239, 0.23);
-    }
-
-    .heavy-pill {
-        margin-left: 0.38rem;
-        color: #fff7ed;
-        background:
-            linear-gradient(
-                135deg,
-                rgba(220, 38, 38, 0.84),
-                rgba(245, 158, 11, 0.82)
-            );
-        box-shadow: 0 0 18px rgba(245, 158, 11, 0.16);
-    }
-
-    .rec-title {
-        position: relative;
-        z-index: 2;
-        margin-top: 0.78rem;
-        color: white;
-        font-size: 1.3rem;
-        font-weight: 950;
-        letter-spacing: -0.03em;
-    }
-
-    .rec-odds {
-        color: #fde68a;
-        font-weight: 950;
-    }
-
-    .star-row {
-        position: relative;
-        z-index: 2;
-        margin-top: 0.53rem;
-        color: #fbbf24;
-        letter-spacing: 0.09em;
-        filter: drop-shadow(0 0 7px rgba(245, 158, 11, 0.17));
-    }
-
-    .rec-stats {
-        position: relative;
-        z-index: 2;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.56rem;
-        margin-top: 0.8rem;
-    }
-
-    .stat-chip {
-        padding: 0.5rem 0.72rem;
-        border-radius: 10px;
-        color: #cbd5e1;
-        background: rgba(255, 255, 255, 0.047);
-        border: 1px solid rgba(255, 255, 255, 0.075);
-        font-size: 0.81rem;
-    }
-
-    .stat-chip strong {
-        color: #f8fafc;
-    }
-
-    .commentary {
-        position: relative;
-        z-index: 2;
-        margin-top: 0.94rem;
-        padding: 0.9rem 1rem;
-        border-radius: 12px;
-        color: #cbd5e1;
-        background: rgba(0, 0, 0, 0.25);
-        border-left: 3px solid var(--cyan);
-        line-height: 1.62;
-    }
-
-    .commentary-heavy {
-        border-left-color: var(--gold);
-    }
-
-    /* Results */
-
-    .result-badge {
-        position: relative;
-        z-index: 2;
-        display: inline-block;
-        margin-top: 0.78rem;
-        padding: 0.44rem 0.72rem;
-        border-radius: 10px;
-        font-size: 0.81rem;
-        font-weight: 900;
-    }
-
-    .result-hit {
-        color: #bbf7d0;
-        background: rgba(16, 185, 129, 0.15);
-        border: 1px solid rgba(16, 185, 129, 0.24);
-    }
-
-    .result-half-win {
-        color: #d9f99d;
-        background: rgba(132, 204, 22, 0.14);
-        border: 1px solid rgba(132, 204, 22, 0.24);
-    }
-
-    .result-push {
-        color: #bae6fd;
-        background: rgba(56, 189, 248, 0.14);
-        border: 1px solid rgba(56, 189, 248, 0.23);
-    }
-
-    .result-half-loss {
-        color: #fed7aa;
-        background: rgba(249, 115, 22, 0.14);
-        border: 1px solid rgba(249, 115, 22, 0.24);
-    }
-
-    .result-miss {
-        color: #fecdd3;
-        background: rgba(244, 63, 94, 0.14);
-        border: 1px solid rgba(244, 63, 94, 0.24);
-    }
-
-    /* Selection warnings */
-
-    .pick-warning {
-        padding: 0.9rem 1rem;
-        margin: 0.6rem 0;
-        border-radius: 13px;
-        color: #fde68a;
-        background: rgba(245, 158, 11, 0.095);
-        border: 1px solid rgba(245, 158, 11, 0.22);
-        line-height: 1.58;
-    }
-
-    .pick-danger {
-        color: #fecdd3;
-        background: rgba(244, 63, 94, 0.105);
-        border-color: rgba(244, 63, 94, 0.25);
-    }
-
-    .pick-info {
-        color: #bae6fd;
-        background: rgba(56, 189, 248, 0.085);
-        border-color: rgba(56, 189, 248, 0.20);
-    }
-
-    /* Manual recommendation corner */
-
-    .parlay-hero {
+    .hero {
         position: relative;
         overflow: hidden;
         padding: 2rem 2.15rem;
-        margin: 0.5rem 0 1.4rem;
-        border-radius: 27px;
+        margin-bottom: 1.25rem;
+        border-radius: 24px;
         background:
-            radial-gradient(
-                circle at 92% 10%,
-                rgba(245, 158, 11, 0.27),
-                transparent 29%
-            ),
-            radial-gradient(
-                circle at 5% 100%,
-                rgba(139, 92, 246, 0.21),
-                transparent 31%
-            ),
             linear-gradient(
-                130deg,
-                rgba(45, 27, 74, 0.94),
-                rgba(38, 29, 38, 0.93),
-                rgba(8, 44, 54, 0.91)
+                120deg,
+                rgba(76,95,255,0.23),
+                rgba(150,68,255,0.16),
+                rgba(0,214,170,0.09)
             );
-        border: 1px solid rgba(245, 158, 11, 0.25);
-        box-shadow:
-            0 30px 90px rgba(0, 0, 0, 0.40),
-            inset 0 1px 0 rgba(255, 255, 255, 0.11);
+        border: 1px solid rgba(255,255,255,0.12);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.36);
     }
 
-    .parlay-hero::after {
-        content: "";
-        position: absolute;
-        width: 210px;
-        height: 210px;
-        top: -145px;
-        right: -40px;
-        border-radius: 50%;
-        background: rgba(253, 230, 138, 0.22);
-        filter: blur(22px);
-    }
-
-    .parlay-eyebrow {
-        position: relative;
-        z-index: 2;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        padding: 0.4rem 0.75rem;
+    .hero-badge {
+        display: inline-block;
+        padding: 0.38rem 0.75rem;
+        margin-bottom: 0.9rem;
         border-radius: 999px;
-        color: #fde68a;
-        background: rgba(245, 158, 11, 0.12);
-        border: 1px solid rgba(245, 158, 11, 0.30);
-        font-size: 0.7rem;
-        font-weight: 950;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
+        color: #c6ffee;
+        background: rgba(0,214,163,0.12);
+        border: 1px solid rgba(0,214,163,0.27);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
     }
 
-    .parlay-hero-title {
-        position: relative;
-        z-index: 2;
-        margin-top: 0.85rem;
+    .hero-title {
+        margin: 0;
         color: white;
-        font-size: clamp(1.8rem, 5vw, 2.55rem);
-        font-weight: 950;
+        font-size: 3rem;
+        font-weight: 850;
         letter-spacing: -0.055em;
-        line-height: 1.08;
     }
 
-    .parlay-hero-copy {
-        position: relative;
-        z-index: 2;
-        max-width: 790px;
-        margin-top: 0.75rem;
-        color: #cbd5e1;
-        line-height: 1.7;
+    .hero-text {
+        max-width: 1050px;
+        margin-top: 0.72rem;
+        color: rgba(255,255,255,0.70);
+        line-height: 1.65;
     }
 
-    .parlay-disclaimer {
-        position: relative;
-        z-index: 2;
-        display: inline-block;
-        margin-top: 1rem;
-        padding: 0.55rem 0.76rem;
-        border-radius: 11px;
-        color: #bae6fd;
-        background: rgba(56, 189, 248, 0.08);
-        border: 1px solid rgba(56, 189, 248, 0.17);
-        font-size: 0.78rem;
-        font-weight: 750;
+    .summary-card {
+        min-height: 125px;
+        padding: 1.05rem 1.15rem;
+        border-radius: 17px;
+        background: rgba(255,255,255,0.045);
+        border: 1px solid rgba(255,255,255,0.085);
+        box-shadow: 0 10px 32px rgba(0,0,0,0.20);
     }
 
-    .parlay-post {
-        position: relative;
-        overflow: hidden;
-        padding: 1.35rem 1.45rem;
-        margin: 0.8rem 0 0.55rem;
-        border-radius: 21px;
-        background:
-            radial-gradient(
-                circle at 100% 0%,
-                rgba(245, 158, 11, 0.10),
-                transparent 32%
-            ),
-            linear-gradient(
-                145deg,
-                rgba(23, 31, 51, 0.95),
-                rgba(10, 16, 29, 0.90)
-            );
-        border: 1px solid rgba(255, 255, 255, 0.095);
-        border-left: 4px solid #f59e0b;
-        box-shadow:
-            0 18px 54px rgba(0, 0, 0, 0.29),
-            inset 0 1px 0 rgba(255, 255, 255, 0.045);
-    }
-
-    .parlay-post::after {
-        content: "✦";
-        position: absolute;
-        top: 0.55rem;
-        right: 1rem;
-        color: rgba(253, 230, 138, 0.18);
-        font-size: 3.1rem;
-        line-height: 1;
-    }
-
-    .parlay-post-number {
-        position: relative;
-        z-index: 2;
-        display: inline-block;
-        padding: 0.28rem 0.56rem;
-        border-radius: 999px;
-        color: #fef3c7;
-        background:
-            linear-gradient(
-                135deg,
-                rgba(217, 119, 6, 0.36),
-                rgba(139, 92, 246, 0.22)
-            );
-        border: 1px solid rgba(245, 158, 11, 0.28);
-        font-size: 0.67rem;
-        font-weight: 950;
+    .summary-label {
+        color: rgba(255,255,255,0.50);
+        font-size: 0.76rem;
+        font-weight: 800;
         letter-spacing: 0.08em;
         text-transform: uppercase;
     }
 
-    .parlay-post-title {
-        position: relative;
-        z-index: 2;
-        margin-top: 0.7rem;
-        padding-right: 2.2rem;
-        color: #fff7d6;
-        font-size: 1.28rem;
-        font-weight: 950;
-        letter-spacing: -0.025em;
+    .summary-value {
+        margin-top: 0.42rem;
+        color: white;
+        font-size: 1.55rem;
+        font-weight: 850;
     }
 
-    .parlay-post-content {
-        position: relative;
-        z-index: 2;
-        margin-top: 0.8rem;
-        color: #d5deeb;
-        font-size: 0.98rem;
-        line-height: 1.82;
-        overflow-wrap: anywhere;
+    .summary-note {
+        margin-top: 0.35rem;
+        color: rgba(255,255,255,0.48);
+        font-size: 0.8rem;
     }
 
-    .parlay-post-meta {
-        position: relative;
-        z-index: 2;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.45rem 0.9rem;
-        margin-top: 0.95rem;
-        padding-top: 0.75rem;
-        color: #718096;
-        border-top: 1px solid rgba(255, 255, 255, 0.07);
-        font-size: 0.75rem;
-        font-weight: 700;
+    .status-pass {
+        color: var(--green);
     }
 
-    .parlay-photo-label {
-        margin: 0.25rem 0 0.4rem;
-        color: #94a3b8;
-        font-size: 0.76rem;
-        font-weight: 800;
+    .status-caution {
+        color: var(--amber);
     }
 
-    .parlay-divider {
-        height: 1px;
-        margin: 1.45rem 0;
+    .status-fail {
+        color: var(--red);
+    }
+
+    .recommendation-card {
+        padding: 1.25rem 1.35rem;
+        margin-bottom: 0.9rem;
+        border-radius: 18px;
         background:
             linear-gradient(
-                90deg,
-                transparent,
-                rgba(245, 158, 11, 0.24),
-                rgba(139, 92, 246, 0.20),
-                transparent
+                120deg,
+                rgba(0,214,163,0.10),
+                rgba(255,255,255,0.035)
             );
+        border: 1px solid rgba(0,214,163,0.22);
+        box-shadow: 0 12px 34px rgba(0,0,0,0.23);
     }
 
-    @media (max-width: 700px) {
-        .parlay-hero {
-            padding: 1.45rem 1.2rem;
-            border-radius: 22px;
-        }
-
-        .parlay-post {
-            padding: 1.15rem 1.05rem;
-        }
-    }
-
-    /* Streamlit widgets */
-
-    .stButton > button,
-    .stDownloadButton > button {
-        min-height: 3rem;
-        border-radius: 13px;
-        border: 1px solid rgba(255, 255, 255, 0.11);
+    .recommendation-rank {
+        color: #7fffd3;
+        font-size: 0.77rem;
         font-weight: 850;
-        transition:
-            transform 0.15s ease,
-            box-shadow 0.15s ease,
-            border-color 0.15s ease;
+        letter-spacing: 0.1em;
     }
 
-    .stButton > button:hover,
-    .stDownloadButton > button:hover {
-        transform: translateY(-1px);
-        border-color: rgba(245, 158, 11, 0.35);
-        box-shadow: 0 11px 30px rgba(0, 0, 0, 0.26);
+    .recommendation-name {
+        margin-top: 0.32rem;
+        color: white;
+        font-size: 1.35rem;
+        font-weight: 850;
     }
 
-    [data-testid="stMetric"] {
-        padding: 1.02rem;
-        border-radius: 17px;
+    .recommendation-stats {
+        margin-top: 0.55rem;
+        color: rgba(255,255,255,0.66);
+        font-size: 0.91rem;
+        line-height: 1.65;
+    }
+
+    .period-badge {
+        display: inline-block;
+        padding: 0.26rem 0.62rem;
+        margin-bottom: 0.4rem;
+        border-radius: 999px;
+        color: #bae6fd;
+        background: rgba(56,189,248,0.11);
+        border: 1px solid rgba(56,189,248,0.24);
+        font-size: 0.72rem;
+        font-weight: 850;
+    }
+
+    .score-card {
+        text-align: center;
+        min-height: 140px;
+        padding: 1.25rem 0.85rem;
+        border-radius: 18px;
         background:
             linear-gradient(
                 145deg,
-                rgba(255, 255, 255, 0.052),
-                rgba(255, 255, 255, 0.025)
+                rgba(130,91,255,0.16),
+                rgba(255,255,255,0.035)
             );
-        border: 1px solid rgba(255, 255, 255, 0.078);
-        box-shadow: 0 10px 32px rgba(0, 0, 0, 0.19);
+        border: 1px solid rgba(151,120,255,0.22);
     }
 
-    [data-testid="stMetricValue"] {
-        font-weight: 950;
-        letter-spacing: -0.04em;
-    }
-
-    [data-testid="stExpander"] {
-        overflow: hidden;
-        border-radius: 20px;
-        border-color: rgba(255, 255, 255, 0.095);
-        background: rgba(255, 255, 255, 0.027);
-    }
-
-    [data-testid="stExpander"] summary {
-        font-weight: 850;
-    }
-
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0.55rem;
-        padding: 0.36rem;
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.037);
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 10px;
-        padding-left: 1.05rem;
-        padding-right: 1.05rem;
-        font-weight: 850;
-    }
-
-    div[data-testid="stTextInput"] input,
-    div[data-testid="stNumberInput"] input {
-        background: rgba(15, 23, 42, 0.86);
-        border-color: rgba(255, 255, 255, 0.11);
+    .score-value {
         color: white;
+        font-size: 2rem;
+        font-weight: 850;
     }
 
-    hr {
-        border-color: rgba(255, 255, 255, 0.08);
+    .score-note {
+        margin-top: 0.35rem;
+        color: #d7ceff;
+        font-size: 0.9rem;
     }
 
-    /* ============================================================
-       V3.1 Premium visual upgrade
-       - Glassmorphism cards with hover lift
-       - Animated gradient borders
-       - Glow effects on movement chips
-       - Smooth reveal animations
-       ============================================================ */
-
-    @keyframes shimmer {
-        0% { background-position: -200% 0; }
-        100% { background-position: 200% 0; }
+    textarea {
+        font-family:
+            "SFMono-Regular",
+            Consolas,
+            monospace !important;
+        font-size: 0.86rem !important;
+        line-height: 1.5 !important;
     }
 
-    @keyframes glow-pulse {
-        0%, 100% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.25); }
-        50% { box-shadow: 0 0 24px rgba(34, 197, 94, 0.55); }
-    }
-
-    @keyframes float-in {
-        from { opacity: 0; transform: translateY(14px); }
-        to   { opacity: 1; transform: translateY(0); }
-    }
-
-    @keyframes border-flow {
-        0%   { --angle: 0deg; }
-        100% { --angle: 360deg; }
-    }
-
-    /* Hero / portal header */
-    .portal-hero {
-        position: relative;
-        background: linear-gradient(
-            135deg,
-            rgba(17, 24, 39, 0.97) 0%,
-            rgba(30, 41, 59, 0.94) 45%,
-            rgba(15, 23, 42, 0.97) 100%
-        );
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        box-shadow:
-            0 20px 60px -20px rgba(0, 0, 0, 0.7),
-            inset 0 1px 0 rgba(255, 255, 255, 0.06);
-        overflow: hidden;
-    }
-
-    .portal-hero::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(
-            900px circle at 85% 15%,
-            rgba(59, 130, 246, 0.10),
-            transparent 55%
-        ),
-        radial-gradient(
-            700px circle at 10% 90%,
-            rgba(16, 185, 129, 0.08),
-            transparent 55%
-        );
-        pointer-events: none;
-    }
-
-    .portal-title {
-        background: linear-gradient(
-            100deg,
-            #f8fafc 10%,
-            #93c5fd 45%,
-            #6ee7b7 80%
-        );
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
-        letter-spacing: -0.02em;
-    }
-
-    /* Recommendation cards */
-    .recommendation-card {
-        position: relative;
-        background: linear-gradient(
-            155deg,
-            rgba(30, 41, 59, 0.72),
-            rgba(15, 23, 42, 0.82)
-        );
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        transition:
-            transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-            box-shadow 220ms ease,
-            border-color 220ms ease;
-        animation: float-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    }
-
-    .recommendation-card:hover {
-        transform: translateY(-4px);
-        border-color: rgba(59, 130, 246, 0.35);
-        box-shadow:
-            0 18px 40px -18px rgba(0, 0, 0, 0.75),
-            0 0 0 1px rgba(59, 130, 246, 0.12);
-    }
-
-    /* Tier accents with glow */
-    .recommendation-card.tier-official {
-        border-left: 3px solid #22c55e;
-    }
-    .recommendation-card.tier-official:hover {
-        box-shadow: 0 18px 40px -18px rgba(34, 197, 94, 0.45);
-    }
-
-    .recommendation-card.tier-alternative {
-        border-left: 3px solid #38bdf8;
-    }
-
-    .recommendation-card.tier-correct-score {
-        border-left: 3px solid #c084fc;
-    }
-
-    .recommendation-card.tier-correct-score:hover {
-        box-shadow: 0 18px 40px -18px rgba(192, 132, 252, 0.45);
-    }
-
-    /* Movement chips with glow */
-    .stat-chip.movement-S,
-    .stat-chip.movement-supported {
-        background: rgba(34, 197, 94, 0.14);
-        border-color: rgba(34, 197, 94, 0.45);
-        color: #86efac;
-        animation: glow-pulse 2.6s ease-in-out infinite;
-    }
-
-    .stat-chip.movement-C,
-    .stat-chip.movement-conflicted {
-        background: rgba(239, 68, 68, 0.13);
-        border-color: rgba(239, 68, 68, 0.45);
-        color: #fca5a5;
-    }
-
-    .stat-chip.movement-N,
-    .stat-chip.movement-neutral {
-        background: rgba(148, 163, 184, 0.12);
-        border-color: rgba(148, 163, 184, 0.3);
-        color: #cbd5e1;
-    }
-
-    .stat-chip.movement-R,
-    .stat-chip.movement-reversed {
-        background: rgba(249, 115, 22, 0.14);
-        border-color: rgba(249, 115, 22, 0.45);
-        color: #fdba74;
-    }
-
-    /* Shimmer on heavy picks */
-    .heavy-badge {
-        background: linear-gradient(
-            100deg,
-            rgba(251, 191, 36, 0.2) 0%,
-            rgba(251, 146, 60, 0.2) 50%,
-            rgba(251, 191, 36, 0.2) 100%
-        );
-        background-size: 200% 100%;
-        animation: shimmer 3.5s ease infinite;
-        border-color: rgba(251, 191, 36, 0.5);
-        color: #fde68a;
-    }
-
-    /* Match heading */
-    .match-heading {
-        background: linear-gradient(
-            155deg,
-            rgba(30, 41, 59, 0.6),
-            rgba(15, 23, 42, 0.78)
-        );
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-    }
-
-    .match-name {
-        font-weight: 700;
-        letter-spacing: -0.01em;
-    }
-
-    /* Score cards (correct score reference) */
-    .score-card {
-        background: linear-gradient(
-            155deg,
-            rgba(124, 58, 237, 0.14),
-            rgba(76, 29, 149, 0.1)
-        );
-        border: 1px solid rgba(192, 132, 252, 0.28);
-        transition:
-            transform 200ms ease,
-            box-shadow 200ms ease;
-    }
-
-    .score-card:hover {
-        transform: translateY(-3px) scale(1.015);
-        box-shadow: 0 14px 30px -14px rgba(192, 132, 252, 0.55);
-        border-color: rgba(192, 132, 252, 0.55);
-    }
-
-    /* Sidebar polish */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(
-            180deg,
-            rgba(15, 23, 42, 0.98),
-            rgba(9, 14, 30, 0.99)
-        );
-        border-right: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    section[data-testid="stSidebar"] .stMarkdown h1,
-    section[data-testid="stSidebar"] .stMarkdown h2,
-    section[data-testid="stSidebar"] .stMarkdown h3 {
-        letter-spacing: -0.01em;
-    }
-
-    /* Metric cards */
     [data-testid="stMetric"] {
-        background: rgba(30, 41, 59, 0.4);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 16px;
-        padding: 0.75rem 1rem;
-        transition: background 200ms ease, transform 200ms ease;
+        padding: 0.9rem 1rem;
+        border-radius: 15px;
+        background: rgba(255,255,255,0.042);
+        border: 1px solid rgba(255,255,255,0.075);
     }
 
-    [data-testid="stMetric"]:hover {
-        background: rgba(30, 41, 59, 0.62);
-        transform: translateY(-2px);
-    }
-
-    [data-testid="stMetricLabel"] {
-        color: rgba(203, 213, 225, 0.78);
-        font-size: 0.78rem;
-        letter-spacing: 0.02em;
-    }
-
-    [data-testid="stMetricValue"] {
-        font-weight: 700;
-        letter-spacing: -0.02em;
-    }
-
-    /* Expander panels (analysis) */
-    [data-testid="stExpander"] {
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 14px;
+    [data-testid="stDataFrame"] {
         overflow: hidden;
-        transition: border-color 200ms ease;
+        border-radius: 15px;
+        border: 1px solid rgba(255,255,255,0.075);
     }
 
-    [data-testid="stExpander"]:hover {
-        border-color: rgba(59, 130, 246, 0.28);
-    }
-
-    [data-testid="stExpander"] summary {
-        font-weight: 600;
-        letter-spacing: -0.01em;
-    }
-
-    /* Buttons */
-    .stButton > button {
-        border-radius: 12px;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        transition: transform 150ms ease, box-shadow 150ms ease;
-    }
-
-    .stButton > button:hover {
-        transform: translateY(-1px);
-    }
-
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 10px 10px 0 0;
-        letter-spacing: -0.01em;
-    }
-
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 10px;
-        height: 10px;
-    }
-
-    ::-webkit-scrollbar-track {
-        background: rgba(15, 23, 42, 0.6);
-    }
-
-    ::-webkit-scrollbar-thumb {
-        background: rgba(100, 116, 139, 0.4);
-        border-radius: 8px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-        background: rgba(100, 116, 139, 0.65);
-    }
-
-    /* Login screen upgrade */
-    [data-testid="stForm"] {
-        background: rgba(30, 41, 59, 0.45);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
-        padding: 1.5rem;
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-    }
-
-    /* Fade-in for the whole app body on load */
-    [data-testid="stAppViewContainer"] {
-        animation: float-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    div[data-testid="stExpander"] {
+        border-radius: 15px;
+        background: rgba(255,255,255,0.018);
     }
 
     @media (max-width: 700px) {
-        .block-container {
-            padding-left: 0.78rem;
-            padding-right: 0.78rem;
+        .hero-title {
+            font-size: 2.15rem;
         }
 
-        .portal-hero {
-            padding: 1.5rem 1.25rem;
-            border-radius: 22px;
+        .hero {
+            padding: 1.4rem 1.3rem;
         }
-
-        .portal-title {
-            font-size: 2.16rem;
-        }
-
-        .portal-subtitle {
-            font-size: 0.94rem;
-        }
-
-        .recommendation-card,
-        .match-heading {
-            padding: 1rem;
-        }
-    }
-
-    /* Result badges */
-    .result-badge {
-        display: inline-block;
-        padding: 0.15rem 0.6rem;
-        border-radius: 6px;
-        font-size: 0.78rem;
-        font-weight: 600;
-        margin-left: 0.4rem;
-    }
-
-    .result-win {
-        background: rgba(34, 197, 94, 0.2);
-        color: #4ade80;
-        border: 1px solid rgba(34, 197, 94, 0.4);
-    }
-
-    .result-loss {
-        background: rgba(239, 68, 68, 0.2);
-        color: #f87171;
-        border: 1px solid rgba(239, 68, 68, 0.4);
-    }
-
-    .result-push {
-        background: rgba(234, 179, 8, 0.2);
-        color: #facc15;
-        border: 1px solid rgba(234, 179, 8, 0.4);
-    }
-
-    .result-void {
-        background: rgba(148, 163, 184, 0.2);
-        color: #94a3b8;
-        border: 1px solid rgba(148, 163, 184, 0.4);
-    }
-
-    .result-pending {
-        background: rgba(100, 116, 139, 0.2);
-        color: #64748b;
-        border: 1px solid rgba(100, 116, 139, 0.4);
     }
     </style>
     """,
@@ -1468,80 +353,27 @@ st.markdown(
 
 
 # ============================================================
-# 3. Generic helpers
+# 4. Generic helpers
 # ============================================================
 
-def clean_text(value: Any) -> str:
+def optional_text(value: Any) -> str:
     if value is None:
         return ""
 
-    try:
-        missing = pd.isna(value)
-
-        if isinstance(missing, bool) and missing:
-            return ""
-
-    except Exception:
-        pass
-
-    text = str(value).strip()
-
-    if text.lower() in {
-        "nan",
-        "none",
-        "<na>",
-        "nat",
-    }:
-        return ""
-
-    return text
-
-
-def clean_lower(value: Any) -> str:
-    return clean_text(value).lower()
-
-
-def clean_upper(value: Any) -> str:
-    return clean_text(value).upper()
-
-
-def clean_identifier(value: Any) -> str:
-    text = clean_text(value)
-
-    if re.fullmatch(r"-?\\d+\\.0", text):
-        return text[:-2]
-
-    return text
+    return str(value).strip()
 
 
 def safe_float(
     value: Any,
     default: Optional[float] = None,
 ) -> Optional[float]:
-    text = clean_text(value)
-
-    if not text:
-        return default
-
-    is_percentage = text.endswith("%")
-
-    text = (
-        text.replace(",", "")
-        .replace("%", "")
-        .strip()
-    )
-
     try:
-        number = float(text)
-
+        number = float(value)
     except (TypeError, ValueError):
         return default
 
     if not math.isfinite(number):
         return default
-
-    if is_percentage:
-        number /= 100
 
     return number
 
@@ -1558,1855 +390,149 @@ def safe_int(
     return int(number)
 
 
-def safe_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-
-    return clean_lower(value) in {
-        "true",
-        "1",
-        "yes",
-        "y",
-        "on",
-        "heavy",
-        "重心",
-    }
-
-
-def escape(value: Any) -> str:
+def html_escape(value: Any) -> str:
     return html.escape(
-        clean_text(value),
-        quote=True,
+        str(value if value is not None else "—")
+    )
+
+
+def json_default(value: Any) -> Any:
+    if hasattr(value, "item"):
+        return value.item()
+
+    if hasattr(value, "tolist"):
+        return value.tolist()
+
+    if isinstance(value, set):
+        return list(value)
+
+    return str(value)
+
+
+def json_text(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        indent=2,
+        default=json_default,
     )
 
 
 def format_probability(
     value: Any,
-    decimals: int = 1,
+    digits: int = 1,
 ) -> str:
     number = safe_float(value)
 
     if number is None:
         return "—"
 
-    if number > 1 and number <= 100:
-        number /= 100
+    if 1.0 < number <= 100.0:
+        number /= 100.0
 
-    return f"{number * 100:.{decimals}f}%"
+    return f"{number * 100:.{digits}f}%"
 
 
 def format_odds(
     value: Any,
-    decimals: int = 2,
+    digits: int = 3,
 ) -> str:
     number = safe_float(value)
 
     if number is None:
         return "—"
 
-    return f"{number:.{decimals}f}"
-
-
-def format_line(value: Any) -> str:
-    number = safe_float(value)
-
-    if number is None:
-        return clean_text(value) or "—"
-
-    if number > 0:
-        return f"+{number:g}"
-
-    return f"{number:g}"
-
-
-def normalize_dataframe(
-    dataframe: pd.DataFrame,
-) -> pd.DataFrame:
-    output = dataframe.copy()
-
-    output.columns = [
-        clean_lower(column)
-        .replace(" ", "_")
-        .replace("-", "_")
-        .replace("/", "_")
-        for column in output.columns
-    ]
-
-    return output
-
-
-def ensure_columns(
-    dataframe: pd.DataFrame,
-    defaults: Dict[str, Any],
-) -> pd.DataFrame:
-    output = dataframe.copy()
-
-    for column, default in defaults.items():
-        if column not in output.columns:
-            output[column] = default
-
-    return output
-
-
-def fill_aliases(
-    dataframe: pd.DataFrame,
-    aliases: Dict[str, List[str]],
-) -> pd.DataFrame:
-    output = dataframe.copy()
-
-    for target, source_columns in aliases.items():
-        if target not in output.columns:
-            output[target] = ""
-
-        target_blank = (
-            output[target]
-            .map(clean_text)
-            .eq("")
-        )
-
-        for source in source_columns:
-            if source not in output.columns:
-                continue
-
-            source_available = (
-                output[source]
-                .map(clean_text)
-                .ne("")
-            )
-
-            mask = target_blank & source_available
-
-            output.loc[mask, target] = (
-                output.loc[mask, source]
-            )
-
-            target_blank = (
-                output[target]
-                .map(clean_text)
-                .eq("")
-            )
-
-    return output
-
-
-def parse_datetime_value(
-    value: Any,
-) -> Optional[pd.Timestamp]:
-    text = clean_text(value)
-
-    if not text:
-        return None
-
-    try:
-        parsed = pd.to_datetime(
-            text,
-            errors="coerce",
-            utc=True,
-        )
-
-    except Exception:
-        return None
-
-    if pd.isna(parsed):
-        return None
-
-    return parsed
-
-def google_drive_image_url(value: Any) -> str:
-    """
-    Convert a Google Drive sharing link created by Google Forms
-    into a URL that Streamlit can display.
-
-    The Drive file/folder must allow "Anyone with the link"
-    viewer access.
-    """
-    link = clean_text(value)
-
-    if not link:
-        return ""
-
-    file_id = ""
-
-    patterns = [
-        r"/file/d/([^/?#]+)",
-        r"/d/([^/?#]+)",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, link)
-
-        if match:
-            file_id = clean_text(
-                match.group(1)
-            )
-            break
-
-    if not file_id:
-        try:
-            parsed = urlparse(link)
-            parameters = parse_qs(
-                parsed.query
-            )
-
-            file_id = clean_text(
-                parameters.get(
-                    "id",
-                    [""],
-                )[0]
-            )
-
-        except Exception:
-            file_id = ""
-
-    if not file_id:
-        return ""
-
-    return (
-        "https://drive.google.com/thumbnail"
-        f"?id={quote(file_id, safe='')}"
-        "&sz=w1800"
-    )
-
-
-def prepare_parlay_posts(
-    dataframe: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Prepare Google Form responses.
-
-    Expected normalized columns:
-    timestamp, title, recommendation, photo
-    """
-    defaults = {
-        "timestamp": "",
-        "title": "",
-        "recommendation": "",
-        "photo": "",
-        "submitted_by": "",
-    }
-
-    if dataframe.empty:
-        return ensure_columns(
-            pd.DataFrame(),
-            defaults,
-        )
-
-    output = dataframe.copy()
-
-    # Accept a few alternative Google Form question names.
-    output = fill_aliases(
-        output,
-        {
-            "timestamp": [
-                "submitted_at",
-                "submission_time",
-                "date",
-                "time",
-            ],
-            "title": [
-                "heading",
-                "recommendation_title",
-                "標題",
-            ],
-            "recommendation": [
-                "content",
-                "text",
-                "message",
-                "recommendation_text",
-                "推介",
-                "推介內容",
-            ],
-            "photo": [
-                "image",
-                "image_url",
-                "photo_url",
-                "圖片",
-            ],
-            "submitted_by": [
-                "submitted_by",
-                "name",
-                "author",
-                "提交者",
-            ],
-        },
-    )
-
-    output = ensure_columns(
-        output,
-        defaults,
-    )
-
-    for column in defaults:
-        output[column] = output[
-            column
-        ].map(clean_text)
-
-    has_content = (
-        output["title"].ne("")
-        | output["recommendation"].ne("")
-        | output["photo"].ne("")
-    )
-
-    output = output[
-        has_content
-    ].copy()
-
-    output["_timestamp_sort"] = output[
-        "timestamp"
-    ].map(parse_datetime_value)
-
-    output = output.sort_values(
-        "_timestamp_sort",
-        ascending=False,
-        na_position="last",
-    )
-
-    return output.reset_index(drop=True)
-
-
-def normalize_probability(value: Any) -> Optional[float]:
-    number = safe_float(value)
-
-    if number is None:
-        return None
-
-    if number > 1 and number <= 100:
-        number /= 100
-
-    if number < 0 or number > 1:
-        return None
-
-    return number
-
-
-def normalize_period(value: Any) -> str:
-    normalized = (
-        clean_upper(value)
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
-
-    aliases = {
-        "": "FT",
-        "FT": "FT",
-        "FULL_TIME": "FT",
-        "FULLTIME": "FT",
-        "90_MIN": "FT",
-        "90_MINUTES": "FT",
-        "MATCH": "FT",
-        "HT": "HT",
-        "HALF_TIME": "HT",
-        "HALFTIME": "HT",
-        "FIRST_HALF": "HT",
-        "1H": "HT",
-        "H1": "HT",
-        "SECOND_HALF": "2H",
-        "2H": "2H",
-        "H2": "2H",
-    }
-
-    return aliases.get(
-        normalized,
-        normalized or "FT",
-    )
-
-
-def normalize_market(value: Any) -> str:
-    normalized = (
-        clean_upper(value)
-        .replace("-", "_")
-        .replace(" ", "_")
-        .replace("/", "_")
-    )
-
-    aliases = {
-        "ASIAN_HANDICAP": "AH",
-        "HANDICAP": "AH",
-        "HDP": "AH",
-        "OVER_UNDER": "OU",
-        "TOTAL": "OU",
-        "TOTALS": "OU",
-        "GOALS": "OU",
-        "MATCH_ODDS": "1X2",
-        "MONEYLINE": "1X2",
-        "THREE_WAY": "1X2",
-        "HOME_HANDICAP_DRAW_AWAY": "HHAD",
-        "HANDICAP_1X2": "HHAD",
-        "TEAM_TOTAL": "TEAM_OU",
-        "TEAM_TOTALS": "TEAM_OU",
-        "TEAM_OVER_UNDER": "TEAM_OU",
-        "CORRECT_SCORE": "CORRECT_SCORE",
-        "SCORE": "CORRECT_SCORE",
-        "CS": "CORRECT_SCORE",
-    }
-
-    return aliases.get(
-        normalized,
-        normalized,
-    )
-
-
-def normalize_tier(
-    value: Any,
-    market: Any = "",
-) -> str:
-    normalized = (
-        clean_upper(value)
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
-
-    if normalize_market(market) == "CORRECT_SCORE":
-        return "CORRECT_SCORE"
-
-    aliases = {
-        "": "ALTERNATIVE",
-        "OFFICIAL": "OFFICIAL",
-        "PRIMARY": "OFFICIAL",
-        "MAIN": "OFFICIAL",
-        "MAIN_PICK": "OFFICIAL",
-        "VIP": "OFFICIAL",
-        "ALTERNATIVE": "ALTERNATIVE",
-        "SECONDARY": "ALTERNATIVE",
-        "OPTIONAL": "ALTERNATIVE",
-        "AGGRESSIVE": "ALTERNATIVE",
-        "CORRECT_SCORE": "CORRECT_SCORE",
-        "SCORE": "CORRECT_SCORE",
-    }
-
-    return aliases.get(
-        normalized,
-        normalized or "ALTERNATIVE",
-    )
-
-
-def normalize_status(value: Any) -> str:
-    normalized = (
-        clean_lower(value)
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
-
-    aliases = {
-        "publish": "published",
-        "published": "published",
-        "active": "published",
-        "upcoming": "published",
-        "open": "published",
-        "live": "published",
-        "ended": "ended",
-        "complete": "ended",
-        "completed": "ended",
-        "finished": "ended",
-        "settled": "ended",
-        "closed": "ended",
-        "draft": "draft",
-        "hidden": "draft",
-    }
-
-    return aliases.get(
-        normalized,
-        normalized,
-    )
-
-
-def normalize_result(value: Any) -> str:
-    normalized = (
-        clean_lower(value)
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
-
-    aliases = {
-        "full_win": "win",
-        "won": "win",
-        "winner": "win",
-        "hit": "hit",
-        "win": "win",
-        "halfwin": "half_win",
-        "half_win": "half_win",
-        "void": "push",
-        "refund": "push",
-        "draw": "push",
-        "push": "push",
-        "halfloss": "half_loss",
-        "half_loss": "half_loss",
-        "full_loss": "loss",
-        "lost": "loss",
-        "miss": "miss",
-        "loss": "loss",
-        "pending": "pending",
-    }
-
-    return aliases.get(
-        normalized,
-        normalized,
-    )
-
-
-def stable_recommendation_id(
-    row: Dict[str, Any],
-    row_number: Any,
-) -> str:
-    explicit = clean_identifier(
-        row.get("rec_id")
-    )
-
-    if explicit:
-        return explicit
-
-    identity = "|".join([
-        clean_identifier(row.get("match_id")),
-        normalize_period(row.get("period")),
-        normalize_market(row.get("market")),
-        clean_upper(row.get("market_scope")),
-        clean_upper(row.get("selection")),
-        clean_text(row.get("line")),
-        clean_text(row.get("rec_title")),
-        clean_text(row.get("rank")),
-        clean_text(row_number),
-    ])
-
-    digest = hashlib.sha256(
-        identity.encode("utf-8")
-    ).hexdigest()[:18]
-
-    return f"auto_{digest}"
-
-
-# ============================================================
-# 4. Google Sheets
-# ============================================================
-
-def get_sheet_id() -> str:
-    try:
-        configured = clean_text(
-            st.secrets["sheets"]["sheet_id"]
-        )
-
-        return configured or DEFAULT_SHEET_ID
-
-    except Exception:
-        return DEFAULT_SHEET_ID
-
-
-def sheet_csv_url(
-    worksheet_name: str,
-) -> str:
-    return (
-        "https://docs.google.com/spreadsheets/d/"
-        f"{get_sheet_id()}/gviz/tq?"
-        "tqx=out:csv&sheet="
-        f"{quote(worksheet_name, safe='')}"
-    )
-
-
-@st.cache_data(
-    ttl=30,
-    show_spinner=False,
-)
-def fetch_sheet(
-    worksheet_name: str,
-) -> pd.DataFrame:
-    try:
-        dataframe = pd.read_csv(
-            sheet_csv_url(worksheet_name),
-            dtype=str,
-            keep_default_na=False,
-        )
-
-        return normalize_dataframe(
-            dataframe
-        )
-
-    except Exception:
-        return pd.DataFrame()
-
-
-def load_portal_data() -> Tuple[
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-]:
-    # ---- 每張表獨立 try-except，避免一張表出錯拖累全部 ----
-    def safe_fetch(table_name: str) -> pd.DataFrame:
-        try:
-            df = fetch_sheet(table_name)
-            return df
-        except Exception as exc:
-            st.sidebar.error(
-                f"❌ 讀取 `{table_name}` 失敗：{exc}"
-            )
-            return pd.DataFrame()
-
-    users_df = safe_fetch("users")
-    matches_df = safe_fetch("matches")
-    recommendations_df = safe_fetch("recommendations")
-    analysis_df = safe_fetch("analysis")
-
-    # ---- 寫入 session_state，讓 sidebar 可以讀取 ----
-    st.session_state["_diag_matches"] = matches_df
-    st.session_state["_diag_recommendations"] = recommendations_df
-    st.session_state["_diag_analysis"] = analysis_df
-    st.session_state["_diag_users"] = users_df
-
-    return (
-        users_df,
-        matches_df,
-        recommendations_df,
-        analysis_df,
-    )
-
-
-def render_diagnostics() -> None:
-    """在 sidebar 底部顯示系統診斷資訊（一定看得到）。"""
-    with st.sidebar:
-        st.markdown("---")
-        with st.expander("🔧 系統診斷", expanded=False):
-            matches_df = st.session_state.get(
-                "_diag_matches", pd.DataFrame()
-            )
-            recommendations_df = st.session_state.get(
-                "_diag_recommendations", pd.DataFrame()
-            )
-            analysis_df = st.session_state.get(
-                "_diag_analysis", pd.DataFrame()
-            )
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("matches", f"{len(matches_df)} 行")
-                st.metric("analysis", f"{len(analysis_df)} 行")
-            with col2:
-                st.metric("recommendations", f"{len(recommendations_df)} 行")
-
-            # match_id 比對
-            if not matches_df.empty and not analysis_df.empty:
-                if (
-                    "match_id" in matches_df.columns
-                    and "match_id" in analysis_df.columns
-                ):
-                    ids_m = set(
-                        matches_df["match_id"]
-                        .dropna().astype(str)
-                        .str.strip().str.lower()
-                    )
-                    ids_a = set(
-                        analysis_df["match_id"]
-                        .dropna().astype(str)
-                        .str.strip().str.lower()
-                    )
-                    overlap = ids_m & ids_a
-                    st.caption(
-                        f"matches match_id: {sorted(ids_m)[:3]}"
-                    )
-                    st.caption(
-                        f"analysis match_id: {sorted(ids_a)[:3]}"
-                    )
-                    if overlap:
-                        st.success(f"✅ 對上 {len(overlap)} 個")
-                    else:
-                        st.error("❌ 0 個對上")
-                else:
-                    st.error("⚠️ 某張表缺少 match_id 欄位")
-
-            # debug toggle
-            st.session_state["_debug_analysis"] = st.checkbox(
-                "賽事詳情顯示 analysis 狀態",
-                value=False,
-                key="debug_analysis_toggle",
-            )
-
-
-# ============================================================
-# V3: Parse the analysis sheet into a lookup-friendly form.
-# Each row stores JSON blobs for audits / stress / priors / CS.
-# ============================================================
-
-JSON_ANALYSIS_FIELDS = [
-    "movement_audits_json",
-    "family_out_json",
-    "stress_audits_json",
-    "prior_comparison_json",
-    "correct_scores_json",
-]
-
-
-def prepare_analysis(
-    raw_analysis_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """Normalize the analysis sheet and parse its JSON blob columns."""
-    if raw_analysis_df is None or raw_analysis_df.empty:
-        return pd.DataFrame()
-
-    dataframe = raw_analysis_df.copy()
-
-    for field in JSON_ANALYSIS_FIELDS:
-        if field not in dataframe.columns:
-            dataframe[field] = ""
-
-    return dataframe
-
-
-def parse_analysis_json(
-    value,
-    default=None,
-):
-    """Safely parse a JSON string from an analysis cell."""
-    if default is None:
-        default = []
-
-    if value is None:
-        return default
-
-    text = clean_text(value)
-
-    if not text:
-        return default
-
-    try:
-        decoded = json.loads(text)
-
-    except Exception:
-        return default
-
-    if decoded is None:
-        return default
-
-    return decoded
-
-
-def parse_json_field(
-    value,
-    default=None,
-):
-    """Alias for parse_analysis_json.
-
-    Exists because several render helpers were originally
-    written against this shorter name. Both names resolve
-    to the same implementation.
-    """
-    return parse_analysis_json(
-        value,
-        default=default,
-    )
-
-
-# ============================================================
-# 5. Authentication
-# ============================================================
-
-def allow_plaintext_passwords() -> bool:
-    try:
-        configured = st.secrets[
-            "security"
-        ].get(
-            "allow_plaintext_passwords",
-            True,
-        )
-
-        return safe_bool(configured)
-
-    except Exception:
-        # Kept enabled for compatibility with the original sheet.
-        return True
-
-
-def verify_sha256_password(
-    password: str,
-    stored_value: str,
-) -> bool:
-    stored = clean_text(stored_value)
-
-    if not stored.startswith("sha256:"):
-        return False
-
-    expected = stored.split(":", 1)[1].lower()
-
-    calculated = hashlib.sha256(
-        password.encode("utf-8")
-    ).hexdigest()
-
-    return hmac.compare_digest(
-        calculated,
-        expected,
-    )
-
-
-def verify_pbkdf2_password(
-    password: str,
-    stored_value: str,
-) -> bool:
-    """
-    Supported format:
-
-    pbkdf2_sha256$260000$salt$hex_digest
-    """
-    stored = clean_text(stored_value)
-
-    if not stored.startswith(
-        "pbkdf2_sha256$"
-    ):
-        return False
-
-    try:
-        _, iterations_text, salt, expected = (
-            stored.split("$", 3)
-        )
-
-        iterations = int(iterations_text)
-
-        if iterations < 100_000:
-            return False
-
-        calculated = hashlib.pbkdf2_hmac(
-            "sha256",
-            password.encode("utf-8"),
-            salt.encode("utf-8"),
-            iterations,
-        ).hex()
-
-        return hmac.compare_digest(
-            calculated,
-            expected.lower(),
-        )
-
-    except Exception:
-        return False
-
-
-def verify_password(
-    password: str,
-    user: Dict[str, Any],
-    columns: Set[str],
-) -> bool:
-    password_hash = clean_text(
-        user.get("password_hash")
-    )
-
-    if password_hash:
-        if verify_pbkdf2_password(
-            password,
-            password_hash,
-        ):
-            return True
-
-        if verify_sha256_password(
-            password,
-            password_hash,
-        ):
-            return True
-
-    if (
-        allow_plaintext_passwords()
-        and "password" in columns
-    ):
-        stored_plaintext = clean_text(
-            user.get("password")
-        )
-
-        if stored_plaintext:
-            return hmac.compare_digest(
-                password,
-                stored_plaintext,
-            )
-
-    return False
-
-
-def parse_expiry_date(
-    value: Any,
-) -> Optional[datetime]:
-    text = clean_text(value)
-
-    if not text:
-        return None
-
-    try:
-        return datetime.strptime(
-            text,
-            "%Y-%m-%d",
-        )
-
-    except ValueError:
-        return None
-
-
-def authenticate(
-    users: pd.DataFrame,
-    username: str,
-    password: str,
-) -> Tuple[
-    bool,
-    Optional[Dict[str, Any]],
-    str,
-]:
-    normalized_username = clean_lower(
-        username
-    )
-
-    password = clean_text(password)
-
-    if not normalized_username or not password:
-        return (
-            False,
-            None,
-            "請輸入用戶名及密碼。",
-        )
-
-    if users.empty:
-        return (
-            False,
-            None,
-            "暫時無法讀取會員資料，請稍後再試。",
-        )
-
-    if "username" not in users.columns:
-        return (
-            False,
-            None,
-            "會員資料格式不正確：缺少 username 欄位。",
-        )
-
-    matched = users[
-        users["username"]
-        .map(clean_lower)
-        .eq(normalized_username)
-    ]
-
-    if matched.empty:
-        return (
-            False,
-            None,
-            "用戶名或密碼錯誤。",
-        )
-
-    user = matched.iloc[0].to_dict()
-
-    if not verify_password(
-        password,
-        user,
-        set(users.columns),
-    ):
-        return (
-            False,
-            None,
-            "用戶名或密碼錯誤。",
-        )
-
-    if clean_lower(user.get("status")) != "active":
-        return (
-            False,
-            None,
-            "您的會員帳戶目前並非啟用狀態。",
-        )
-
-    expiry_text = clean_text(
-        user.get("expiry_date")
-    )
-
-    expiry = parse_expiry_date(
-        expiry_text
-    )
-
-    if expiry is None:
-        return (
-            False,
-            None,
-            "會員到期日期格式錯誤，應為 YYYY-MM-DD。",
-        )
-
-    if datetime.now().date() > expiry.date():
-        return (
-            False,
-            None,
-            (
-                f"您的會籍已於 {expiry_text} 到期，"
-                "請聯絡雨姐續期。"
-            ),
-        )
-
-    return (
-        True,
-        {
-            "username": clean_text(
-                user.get("username")
-            ),
-            "expiry_date": expiry_text,
-        },
-        "登入成功。",
-    )
-
-
-def validate_logged_in_member(
-    users: pd.DataFrame,
-    session_user: Dict[str, Any],
-) -> Tuple[bool, str]:
-    """
-    Rechecks status and expiry without requiring the password.
-
-    If the users sheet is temporarily unavailable, the current
-    session is preserved rather than immediately logging the
-    member out.
-    """
-    if users.empty or "username" not in users.columns:
-        return True, ""
-
-    username = clean_lower(
-        session_user.get("username")
-    )
-
-    matched = users[
-        users["username"]
-        .map(clean_lower)
-        .eq(username)
-    ]
-
-    if matched.empty:
-        return (
-            False,
-            "會員帳戶已不存在或已被移除。",
-        )
-
-    user = matched.iloc[0].to_dict()
-
-    if clean_lower(user.get("status")) != "active":
-        return (
-            False,
-            "會員帳戶已暫停使用。",
-        )
-
-    expiry_text = clean_text(
-        user.get("expiry_date")
-    )
-
-    expiry = parse_expiry_date(
-        expiry_text
-    )
-
-    if expiry is None:
-        return (
-            False,
-            "會員到期日期格式錯誤。",
-        )
-
-    if datetime.now().date() > expiry.date():
-        return (
-            False,
-            f"會籍已於 {expiry_text} 到期。",
-        )
-
-    st.session_state.portal_user = {
-        "username": clean_text(
-            user.get("username")
-        ),
-        "expiry_date": expiry_text,
-    }
-
-    return True, ""
-
-
-# ============================================================
-# 6. Data preparation
-# ============================================================
-
-RECOMMENDATION_ALIASES = {
-    "rec_id": [
-        "recommendation_id",
-        "pick_id",
-        "id",
-    ],
-    "match_id": [
-        "fixture_id",
-        "event_id",
-        "game_id",
-    ],
-    "rec_title": [
-        "title",
-        "label",
-        "recommendation",
-        "pick_title",
-    ],
-    "period": [
-        "timeframe",
-        "match_period",
-    ],
-    "market": [
-        "market_type",
-        "bet_type",
-    ],
-    "market_scope": [
-        "subject",
-        "team",
-        "team_name",
-        "market_subject",
-    ],
-    "selection": [
-        "pick",
-        "side",
-        "outcome",
-    ],
-    "line": [
-        "handicap",
-        "total_line",
-        "market_line",
-    ],
-    "odds": [
-        "hkjc_odds",
-        "offered_odds",
-        "market_odds",
-        "price",
-    ],
-    "conservative_hit": [
-        "hit_probability_low",
-        "probability_low",
-        "minimum_hit_probability",
-    ],
-    "median_hit": [
-        "hit_probability",
-        "hit_probability_median",
-        "probability_median",
-        "model_probability",
-    ],
-    "nonloss_probability": [
-        "non_loss_probability",
-        "probability_nonloss",
-    ],
-    "full_loss_probability": [
-        "loss_probability",
-        "probability_full_loss",
-    ],
-    "fair_odds": [
-        "model_fair_odds",
-        "central_fair_odds",
-    ],
-    "edge": [
-        "value_edge",
-        "model_edge",
-    ],
-    "expected_value": [
-        "ev",
-        "model_ev",
-    ],
-    "commentary": [
-        "analysis",
-        "short_comment",
-        "summary",
-    ],
-    "is_heavy": [
-        "heavy",
-        "main_focus",
-    ],
-    "conflict_ids": [
-        "conflicts",
-    ],
-    "compatibility_group": [
-        "compatibility_key",
-        "market_group",
-    ],
-}
-
-MATCH_ALIASES = {
-    "match_id": [
-        "fixture_id",
-        "event_id",
-        "game_id",
-    ],
-    "match_name": [
-        "fixture",
-        "event_name",
-        "game_name",
-    ],
-    "home_team": [
-        "home",
-        "home_name",
-    ],
-    "away_team": [
-        "away",
-        "away_name",
-    ],
-    "competition": [
-        "league",
-        "tournament",
-    ],
-    "kickoff": [
-        "kickoff_time",
-        "start_time",
-        "match_time",
-    ],
-    "model_direction": [
-        "direction",
-        "primary_direction",
-    ],
-    "model_summary": [
-        "summary",
-        "analysis",
-    ],
-    "top_scores": [
-        "correct_scores",
-        "score_reference",
-    ],
-    "final_score": [
-        "score",
-        "result_score",
-    ],
-}
-
-
-def prepare_recommendations(
-    recommendations: pd.DataFrame,
-) -> pd.DataFrame:
-    if recommendations.empty:
-        return ensure_columns(
-            pd.DataFrame(),
-            RECOMMENDATION_DEFAULTS,
-        )
-
-    output = fill_aliases(
-        recommendations,
-        RECOMMENDATION_ALIASES,
-    )
-
-    output = ensure_columns(
-        output,
-        RECOMMENDATION_DEFAULTS,
-    )
-
-    output["match_id"] = output[
-        "match_id"
-    ].map(clean_identifier)
-
-    output["period"] = output[
-        "period"
-    ].map(normalize_period)
-
-    output["market"] = output[
-        "market"
-    ].map(normalize_market)
-
-    output["market_scope"] = output[
-        "market_scope"
-    ].map(clean_upper)
-
-    output["selection"] = output[
-        "selection"
-    ].map(clean_upper)
-
-    output["tier"] = [
-        normalize_tier(tier, market)
-        for tier, market in zip(
-            output["tier"],
-            output["market"],
-        )
-    ]
-
-    output["status"] = output[
-        "status"
-    ].map(normalize_status)
-
-    output["result"] = output[
-        "result"
-    ].map(normalize_result)
-
-    output["is_heavy"] = output[
-        "is_heavy"
-    ].map(safe_bool)
-
-    output["rank"] = output[
-        "rank"
-    ].map(
-        lambda value: safe_int(
-            value,
-            999,
-        )
-    )
-
-    output["stars"] = output[
-        "stars"
-    ].map(
-        lambda value: max(
-            1,
-            min(
-                5,
-                safe_int(value, 3),
-            ),
-        )
-    )
-
-    numeric_columns = [
-        "line",
-        "odds",
-        "fair_odds",
-        "edge",
-        "expected_value",
-    ]
-
-    for column in numeric_columns:
-        output[column] = output[
-            column
-        ].map(safe_float)
-
-    probability_columns = [
-        "conservative_hit",
-        "median_hit",
-        "nonloss_probability",
-        "full_loss_probability",
-    ]
-
-    for column in probability_columns:
-        output[column] = output[
-            column
-        ].map(normalize_probability)
-
-    output["rec_title"] = output[
-        "rec_title"
-    ].map(clean_text)
-
-    output["rec_id"] = [
-        stable_recommendation_id(
-            row.to_dict(),
-            index,
-        )
-        for index, row in output.iterrows()
-    ]
-
-    return output.reset_index(drop=True)
-
-
-def derive_matches_from_recommendations(
-    recommendations: pd.DataFrame,
-) -> pd.DataFrame:
-    if (
-        recommendations.empty
-        or "match_id" not in recommendations.columns
-    ):
-        return ensure_columns(
-            pd.DataFrame(),
-            MATCH_DEFAULTS,
-        )
-
-    rows: List[Dict[str, Any]] = []
-
-    for match_id, group in recommendations.groupby(
-        "match_id",
-        dropna=False,
-    ):
-        normalized_id = clean_identifier(
-            match_id
-        )
-
-        if not normalized_id:
-            continue
-
-        statuses = group[
-            "status"
-        ].map(normalize_status)
-
-        status = (
-            "ended"
-            if not statuses.empty
-            and statuses.eq("ended").all()
-            else "published"
-        )
-
-        # Try to derive a meaningful match name from the group
-        match_name = ""
-
-        # Check if any row has match_name
-        if "match_name" in group.columns:
-            names = group["match_name"].dropna().unique()
-            if len(names) > 0:
-                match_name = clean_text(names[0])
-
-        # If no match_name, try home_team vs away_team
-        if not match_name:
-            home_team = ""
-            away_team = ""
-
-            if "home_team" in group.columns:
-                homes = group["home_team"].dropna().unique()
-                if len(homes) > 0:
-                    home_team = clean_text(homes[0])
-
-            if "away_team" in group.columns:
-                aways = group["away_team"].dropna().unique()
-                if len(aways) > 0:
-                    away_team = clean_text(aways[0])
-
-            if home_team and away_team:
-                match_name = f"{home_team} vs {away_team}"
-
-        rows.append({
-            **MATCH_DEFAULTS,
-            "match_id": normalized_id,
-            "match_name": match_name,
-            "home_team": (
-                clean_text(
-                    group["home_team"].dropna.iloc[0]
-                )
-                if "home_team" in group.columns
-                and len(group["home_team"].dropna()) > 0
-                else ""
-            ),
-            "away_team": (
-                clean_text(
-                    group["away_team"].dropna.iloc[0]
-                )
-                if "away_team" in group.columns
-                and len(group["away_team"].dropna()) > 0
-                else ""
-            ),
-            "competition": (
-                clean_text(
-                    group["competition"].dropna.iloc[0]
-                )
-                if "competition" in group.columns
-                and len(group["competition"].dropna()) > 0
-                else ""
-            ),
-            "kickoff": (
-                clean_text(
-                    group["kickoff"].dropna.iloc[0]
-                )
-                if "kickoff" in group.columns
-                and len(group["kickoff"].dropna()) > 0
-                else ""
-            ),
-            "status": status,
-        })
-
-    return pd.DataFrame(rows)
-
-
-def prepare_matches(
-    matches: pd.DataFrame,
-    recommendations: pd.DataFrame,
-) -> pd.DataFrame:
-    if matches.empty:
-        return derive_matches_from_recommendations(
-            recommendations
-        )
-
-    output = fill_aliases(
-        matches,
-        MATCH_ALIASES,
-    )
-
-    output = ensure_columns(
-        output,
-        MATCH_DEFAULTS,
-    )
-
-    output["match_id"] = output[
-        "match_id"
-    ].map(clean_identifier)
-
-    output["status"] = output[
-        "status"
-    ].map(normalize_status)
-
-    recommendation_statuses: Dict[str, str] = {}
-
-    if not recommendations.empty:
-        for match_id, group in recommendations.groupby(
-            "match_id"
-        ):
-            statuses = group[
-                "status"
-            ].map(normalize_status)
-
-            recommendation_statuses[
-                clean_identifier(match_id)
-            ] = (
-                "ended"
-                if not statuses.empty
-                and statuses.eq("ended").all()
-                else "published"
-            )
-
-    for index, row in output.iterrows():
-        match_id = clean_identifier(
-            row.get("match_id")
-        )
-
-        if not clean_text(row.get("status")):
-            output.at[index, "status"] = (
-                recommendation_statuses.get(
-                    match_id,
-                    "",
-                )
-            )
-
-        match_name = clean_text(
-            row.get("match_name")
-        )
-
-        if not match_name:
-            home = clean_text(
-                row.get("home_team")
-            )
-
-            away = clean_text(
-                row.get("away_team")
-            )
-
-            if home and away:
-                output.at[
-                    index,
-                    "match_name",
-                ] = f"{home} vs {away}"
-
-            else:
-                output.at[
-                    index,
-                    "match_name",
-                ] = match_id
-
-    output = output[
-        output["match_id"]
-        .map(clean_text)
-        .ne("")
-    ]
-
-    output = output.drop_duplicates(
-        subset=["match_id"],
-        keep="last",
-    )
-
-    return output.reset_index(drop=True)
-
-
-def visible_records(
-    matches: pd.DataFrame,
-    recommendations: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    visible_matches = matches[
-        matches["status"].isin(
-            VISIBLE_STATUSES
-        )
-    ].copy()
-
-    visible_recommendations = recommendations[
-        recommendations["status"].isin(
-            VISIBLE_STATUSES
-        )
-    ].copy()
-
-    visible_match_ids = {
-        clean_identifier(value)
-        for value in visible_matches["match_id"]
-        if clean_identifier(value)
-    }
-
-    visible_recommendations = (
-        visible_recommendations[
-            visible_recommendations[
-                "match_id"
-            ]
-            .map(clean_identifier)
-            .isin(visible_match_ids)
-        ]
-    )
-
-    return (
-        visible_matches.reset_index(drop=True),
-        visible_recommendations.reset_index(
-            drop=True
-        ),
-    )
-
-
-# ============================================================
-# 8. Personal selection state
-# ============================================================
-
-def selected_ids() -> Set[str]:
-    return set(
-        st.session_state.get(
-            "my_pick_ids",
-            [],
-        )
-    )
-
-
-def add_pick(rec_id: str) -> None:
-    ids = selected_ids()
-
-    if rec_id not in ids:
-        ids.add(rec_id)
-
-        st.session_state.my_pick_ids = (
-            list(ids)
-        )
-
-
-def remove_pick(rec_id: str) -> None:
-    ids = selected_ids()
-
-    if rec_id in ids:
-        ids.remove(rec_id)
-
-        st.session_state.my_pick_ids = (
-            list(ids)
-        )
-
-
-def clear_all_picks() -> None:
-    st.session_state.my_pick_ids = []
-
-
-def update_pick_selection(
-    rec_id: str,
-    widget_key: str,
-) -> None:
-    checked = bool(
-        st.session_state.get(
-            widget_key,
-            False,
-        )
-    )
-
-    if checked:
-        add_pick(rec_id)
-    else:
-        remove_pick(rec_id)
-
-
-def recommendation_identity(
-    row: Dict[str, Any],
-) -> str:
-    rec_id = clean_identifier(
-        row.get("rec_id")
-    )
-
-    if rec_id:
-        return rec_id
-
-    return stable_recommendation_id(
-        row,
-        row.get("index", ""),
-    )
-
-
-def recommendation_title(
-    row: Dict[str, Any],
-) -> str:
-    title = clean_text(
-        row.get("rec_title")
-    )
-
-    if title:
-        return title
-
-    selection = clean_text(
-        row.get("selection")
-    )
-
-    line = safe_float(
-        row.get("line")
-    )
-
-    if selection and line is not None:
-        return (
-            f"{selection} "
-            f"{format_line(line)}"
-        )
-
-    return selection or "未命名選擇"
-
-
-# ============================================================
-# 9. Status translations (V3)
-# ============================================================
-
-def movement_status_chinese(
-    value: Any,
-) -> str:
-    translations = {
-        "SUPPORTED": "莊家同向",
-        "CONFLICTED": "莊家衝突",
-        "NEUTRAL": "中性",
-        "NOT_AVAILABLE": "無數據",
-        "NOT_PROVIDED": "未提供",
-        "STRENGTHENING": "持續加強",
-        "WEAKENING": "持續減弱",
-    }
-
-    text = clean_upper(value)
-
-    if not text:
-        return "—"
-
-    return translations.get(
-        text,
-        text.replace("_", " "),
-    )
-
-
-def movement_status_class(
-    value: Any,
-) -> str:
-    text = clean_upper(value)
-
-    if text in {
-        "SUPPORTED",
-        "STRENGTHENING",
-    }:
-        return "mv-sup"
-
-    if text in {
-        "CONFLICTED",
-        "WEAKENING",
-    }:
-        return "mv-con"
-
-    if text == "NEUTRAL":
-        return "mv-neu"
-
-    return "mv-na"
-
-
-
-# ==========================================================
-# Tier & Period Presentation Helpers
-# ==========================================================
-
-def tier_presentation(
-    tier_value: Any,
-) -> Tuple[str, str, str]:
-    """Return (label, pill_class, card_class) for a tier."""
-    tier = normalize_tier(tier_value)
-
-    mapping = {
-        "OFFICIAL": (
-            "🟢 官方推薦",
-            "tier-pill-official",
-            "rec-card-official",
-        ),
-        "ALTERNATIVE": (
-            "⚡ 進取選擇",
-            "tier-pill-alternative",
-            "rec-card-alternative",
-        ),
-        "CORRECT_SCORE": (
-            "🎯 波膽",
-            "tier-pill-score",
-            "rec-card-score",
-        ),
-    }
-
-    return mapping.get(
-        tier,
-        ("📌 其他", "tier-pill-alternative", "rec-card-alternative"),
-    )
-
-
-def period_presentation(
-    period_value: Any,
-) -> Tuple[str, str]:
-    """Return (label, pill_class) for a period."""
-    period = clean_upper(period_value)
-
-    mapping = {
-        "FT": ("FT 全場", "period-ft"),
-        "HT": ("HT 半場", "period-ht"),
-        "2H": ("2H 下半場", "period-2h"),
-    }
-
-    return mapping.get(
-        period,
-        (period or "FT", "period-ft"),
-    )
-
-
-
-
-def result_badge(
-    result_value: Any,
-) -> str:
-    """Render a result badge for a recommendation."""
-    result = clean_upper(result_value)
-
-    if not result or result == "PENDING":
-        return ""
-
-    mapping = {
-        "WIN": (
-            '<span class="result-badge result-win">'
-            "✅ 命中"
-            "</span>"
-        ),
-        "LOSS": (
-            '<span class="result-badge result-loss">'
-            "❌ 未中"
-            "</span>"
-        ),
-        "PUSH": (
-            '<span class="result-badge result-push">'
-            "🟡 走盤"
-            "</span>"
-        ),
-        "VOID": (
-            '<span class="result-badge result-void">'
-            "⚪ 作廢"
-            "</span>"
-        ),
-        "HALF_WIN": (
-            '<span class="result-badge result-win">'
-            "✅ 半贏"
-            "</span>"
-        ),
-        "HALF_LOSS": (
-            '<span class="result-badge result-loss">'
-            "❌ 半輸"
-            "</span>"
-        ),
-    }
-
-    return mapping.get(
-        result,
-        f'<span class="result-badge result-pending">{result}</span>',
-    )
+    return f"{number:.{digits}f}"
 
 
 def format_ev(
     value: Any,
-    decimals: int = 2,
+    digits: int = 2,
 ) -> str:
-    """Format expected value as percentage."""
     number = safe_float(value)
 
     if number is None:
         return "—"
 
-    # If value is in basis points or > 1, normalize
-    if abs(number) > 1 and abs(number) <= 100:
-        number /= 100
-
-    if number > 0:
-        return f"+{number * 100:.{decimals}f}%"
-
-    return f"{number * 100:.{decimals}f}%"
+    return f"{number * 100:+.{digits}f}%"
 
 
+def probability_value(
+    record: Dict[str, Any],
+    metric: str,
+    statistic: str = "minimum",
+) -> Any:
+    probability = record.get(
+        "probability",
+        {},
+    )
 
-def robustness_status_chinese(
-    value: Any,
-) -> str:
+    if not isinstance(probability, dict):
+        return None
+
+    metric_record = probability.get(
+        metric,
+        {},
+    )
+
+    if not isinstance(metric_record, dict):
+        return None
+
+    return metric_record.get(
+        statistic
+    )
+
+
+def summary_value(
+    record: Dict[str, Any],
+    field: str,
+    statistic: str = "minimum",
+) -> Any:
+    section = record.get(
+        field,
+        {},
+    )
+
+    if isinstance(section, dict):
+        return section.get(
+            statistic
+        )
+
+    return section
+
+
+def status_chinese(status: Any) -> str:
     translations = {
+        "PASS": "通過",
+        "CAUTION": "注意",
+        "FAIL": "失敗",
+        "COMPLETED": "已完成",
+        "NOT_AVAILABLE": "不適用",
+        "NOT_PROVIDED": "未提供",
+        "NOT_TESTABLE": "無法測試",
+        "DISABLED": "已停用",
         "ROBUST": "穩健",
         "FRAGILE": "脆弱",
-        "PASS": "通過",
-        "FAIL": "失敗",
-        "NOT_AVAILABLE": "無數據",
-        "NOT_PROVIDED": "未提供",
+        "OFFICIAL": "正式推薦",
+        "REFERENCE_ONLY": "僅供參考",
+        "FAIR_OR_BETTER": "價格合理或更佳",
+        "MIXED_PRICE": "價格訊號混合",
+        "SLIGHTLY_UNDERPAID": "輕微回報不足",
+        "POOR_PRICE": "價格偏差",
+        "SEVERELY_UNDERPAID": "嚴重回報不足",
+        "SUPPORTED": "支持",
+        "CONFLICTED": "衝突",
+        "NEUTRAL": "中性",
+        "STRONG": "強",
+        "MODERATE": "中等",
+        "WEAK": "弱",
+        "NONE": "沒有",
+        "UNKNOWN": "未知",
     }
 
-    text = clean_upper(value)
-
-    if not text:
-        return "—"
+    text = optional_text(
+        status
+    ).upper() or "UNKNOWN"
 
     return translations.get(
         text,
@@ -3414,541 +540,920 @@ def robustness_status_chinese(
     )
 
 
-# ============================================================
-# 10. Recommendation renderer (V3-aware)
-# ============================================================
+def status_css_class(status: Any) -> str:
+    value = optional_text(
+        status
+    ).upper()
 
-def render_recommendation(
-    row: Dict[str, Any],
-    *,
-    allow_selection: bool = True,
+    if value in {
+        "PASS",
+        "COMPLETED",
+        "SUPPORTED",
+        "ROBUST",
+        "OFFICIAL",
+        "FAIR_OR_BETTER",
+    }:
+        return "status-pass"
+
+    if value in {
+        "CAUTION",
+        "NEUTRAL",
+        "NOT_AVAILABLE",
+        "NOT_PROVIDED",
+        "NOT_TESTABLE",
+        "DISABLED",
+        "FRAGILE",
+        "MIXED_PRICE",
+    }:
+        return "status-caution"
+
+    return "status-fail"
+
+
+def result_summary_card(
+    label: str,
+    value: str,
+    note: str,
+    css_class: str = "",
 ) -> None:
-    rec_id = recommendation_identity(
-        row
+    st.markdown(
+        f"""
+        <div class="summary-card">
+            <div class="summary-label">
+                {html_escape(label)}
+            </div>
+            <div class="summary-value {css_class}">
+                {html_escape(value)}
+            </div>
+            <div class="summary-note">
+                {html_escape(note)}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    tier_label, tier_class, card_class = (
-        tier_presentation(
-            row.get("tier")
-        )
+
+def download_name(prefix: str) -> str:
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
     )
 
-    period_label, period_class = (
-        period_presentation(
-            row.get("period")
-        )
-    )
+    return f"{prefix}_{timestamp}.json"
 
-    heavy = safe_bool(
-        row.get("is_heavy")
-    )
 
-    if heavy:
-        card_class = (
-            "recommendation-card-heavy"
-        )
+# ============================================================
+# 5. Example V3 input
+# ============================================================
 
-    title = escape(
-        recommendation_title(row)
-    )
-
-    odds = safe_float(
-        row.get("odds")
-    )
-
-    conservative_hit = safe_float(
-        row.get("conservative_hit")
-    )
-
-    median_hit = safe_float(
-        row.get("median_hit")
-    )
-
-    nonloss = safe_float(
-        row.get("nonloss_probability")
-    )
-
-    full_loss = safe_float(
-        row.get("full_loss_probability")
-    )
-
-    fair_odds = safe_float(
-        row.get("fair_odds")
-    )
-
-    edge = safe_float(
-        row.get("edge")
-    )
-
-    expected_value = safe_float(
-        row.get("expected_value")
-    )
-
-    line = safe_float(
-        row.get("line")
-    )
-
-    stars = max(
-        1,
-        min(
-            5,
-            safe_int(
-                row.get("stars"),
-                3,
+def example_json_input() -> Dict[str, Any]:
+    return {
+        "match": {
+            "name": "主隊 vs 客隊",
+            "home": "主隊",
+            "away": "客隊",
+            "competition": "示例賽事",
+            "kickoff": "",
+            "snapshot_time": (
+                datetime.now()
+                .astimezone()
+                .isoformat(
+                    timespec="minutes"
+                )
             ),
-        ),
-    )
+        },
+        "sharp_books": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "markets": {
+                    "FT": {
+                        "1X2": {
+                            "home": 2.12,
+                            "draw": 3.35,
+                            "away": 3.55,
+                        },
+                        "AH": [
+                            {
+                                "line": -0.25,
+                                "home": 1.95,
+                                "away": 1.95,
+                            }
+                        ],
+                        "OU": [
+                            {
+                                "line": 2.25,
+                                "over": 1.92,
+                                "under": 1.98,
+                            }
+                        ],
+                        "HHAD": [],
+                        "TEAM_OU": [],
+                    },
+                    "HT": {
+                        "1X2": {
+                            "home": 2.75,
+                            "draw": 2.10,
+                            "away": 4.10,
+                        },
+                        "AH": [
+                            {
+                                "line": 0.0,
+                                "home": 1.62,
+                                "away": 2.28,
+                            }
+                        ],
+                        "OU": [
+                            {
+                                "line": 1.0,
+                                "over": 1.92,
+                                "under": 1.98,
+                            }
+                        ],
+                        "HHAD": [],
+                        "TEAM_OU": [],
+                    },
+                },
+            }
+        ],
+        "hkjc_markets": [
+            {
+                "id": "M001",
+                "period": "FT",
+                "market": "AH",
+                "selection": "HOME",
+                "line": -0.25,
+                "odds": 1.95,
+                "label": "主隊 全場 AH -0.25",
+            },
+            {
+                "id": "M002",
+                "period": "FT",
+                "market": "OU",
+                "selection": "UNDER",
+                "line": 2.25,
+                "odds": 1.88,
+                "label": "全場入球細 2.25",
+            },
+            {
+                "id": "M003",
+                "period": "HT",
+                "market": "OU",
+                "selection": "UNDER",
+                "line": 1.0,
+                "odds": 1.90,
+                "label": "半場入球細 1.0",
+            },
+        ],
+        "odds_movements": [],
+        "settings": {
+            "minimum_odds": 1.50,
+            "maximum_odds": None,
+            "max_recommendations": 3,
+            "minimum_official_hit_probability": 0.50,
+            "correct_score_count": 2,
+            "devig_methods": [
+                "MULTIPLICATIVE",
+                "POWER",
+                "SHIN",
+            ],
+            "primary_source": "pinnacle",
+            "ev_rejection_floor": None,
+            "features": {
+                "quality_gate": True,
+                "stress_audit": True,
+                "family_out_audit": True,
+                "adaptive_grids": True,
+                "ht_ft_coherence": True,
+                "prior_comparison": True,
+                "odds_shift_analysis": True,
+            },
+            "movement": {
+                "neutral_threshold_pp": 0.50,
+                "strong_threshold_pp": 2.00,
+                "minimum_external_books": 2,
+                "minimum_agreement": 0.60,
+                "strong_agreement": 0.75,
+                "adjacent_line_tolerance": 0.50,
+            },
+        },
+    }
 
-    commentary = escape(
-        row.get("commentary")
-    )
 
-    market = escape(
-        normalize_market(
-            row.get("market")
-        )
-    )
+# ============================================================
+# 6. Input compatibility validation
+# ============================================================
 
-    market_scope = escape(
-        row.get("market_scope")
-    )
+def reject_unsupported_correct_score_inputs(
+    input_data: Dict[str, Any],
+) -> None:
+    """
+    Engine V3 generates correct-score references from the FT
+    score distribution. It does not accept CORRECT_SCORE as a
+    sharp constraint or HKJC candidate market.
+    """
 
-    price_status = escape(
-        row.get("price_status")
-    )
-
-    heavy_html = (
-        '<span class="heavy-pill">'
-        "🔥 重心"
-        "</span>"
-        if heavy
-        else ""
-    )
-
-    odds_html = (
-        ' · <span class="rec-odds">@{o}</span>'.format(
-            o=format_odds(odds)
-        )
-        if odds is not None
-        else ""
-    )
-
-    # ---- V3 movement chip ----
-    movement_chips: List[str] = []
-
-    verdict = clean_upper(
-        row.get("movement_verdict")
-    )
-
-    if verdict:
-        cls = movement_status_class(
-            verdict
-        )
-
-        verdict_label = (
-            movement_status_chinese(verdict)
-        )
-
-        strength = clean_upper(
-            row.get("movement_strength")
-        )
-
-        if strength:
-            verdict_label += (
-                " · "
-                + movement_status_chinese(strength)
-            )
-
-        movement_chips.append(
-            f'<div class="stat-chip {cls}">'
-            "📈 走勢 "
-            f"<strong>{verdict_label}</strong>"
-            "</div>"
-        )
-
-        change_pp = safe_float(
-            row.get(
-                "movement_probability_change_pp"
-            )
-        )
-
-        if change_pp is not None:
-            sign = "+" if change_pp >= 0 else ""
-
-            movement_chips.append(
-                '<div class="stat-chip {cls}">概率變動 '
-                '<strong>{sign}{pp:.2f}pp</strong></div>'.format(
-                    cls=cls,
-                    sign=sign,
-                    pp=change_pp,
-                )
-            )
-
-        agreement = safe_float(
-            row.get(
-                "movement_agreement_ratio"
-            )
-        )
-
-        if agreement is not None:
-            movement_chips.append(
-                '<div class="stat-chip mv-na">莊家一致 '
-                '<strong>{p}</strong></div>'.format(
-                    p=format_probability(agreement),
-                )
-            )
-
-    family_status = clean_upper(
-        row.get("family_out_status")
-    )
-
-    if family_status:
-        fam_cls = (
-            "mv-sup"
-            if family_status == "ROBUST"
-            else (
-                "mv-con"
-                if family_status == "FRAGILE"
-                else "mv-na"
-            )
-        )
-
-        movement_chips.append(
-            '<div class="stat-chip {cls}">🛡️ 穩健性 '
-            '<strong>{label}</strong></div>'.format(
-                cls=fam_cls,
-                label=robustness_status_chinese(family_status),
-            )
-        )
-
-    statistics: List[str] = []
-
-    if conservative_hit is not None:
-        statistics.append(
-            "<div class='stat-chip'>"
-            "保守命中 "
-            f"<strong>{format_probability(conservative_hit)}</strong>"
-            "</div>"
-        )
-
-    if median_hit is not None:
-        statistics.append(
-            "<div class='stat-chip'>"
-            "中位命中 "
-            f"<strong>{format_probability(median_hit)}</strong>"
-            "</div>"
-        )
-
-    if nonloss is not None:
-        statistics.append(
-            "<div class='stat-chip'>"
-            "不輸概率 "
-            f"<strong>{format_probability(nonloss)}</strong>"
-            "</div>"
-        )
-
-    if full_loss is not None:
-        statistics.append(
-            "<div class='stat-chip'>"
-            "全輸風險 "
-            f"<strong>{format_probability(full_loss)}</strong>"
-            "</div>"
-        )
-
-    if fair_odds is not None:
-        statistics.append(
-            "<div class='stat-chip'>"
-            "模型公平賠率 "
-            f"<strong>{format_odds(fair_odds)}</strong>"
-            "</div>"
-        )
-
-    if edge is not None:
-        edge_display = (
-            edge / 100
-            if abs(edge) > 1
-            else edge
-        )
-
-        statistics.append(
-            "<div class='stat-chip'>"
-            "模型 Edge "
-            f"<strong>{format_probability(edge_display)}</strong>"
-            "</div>"
-        )
-
-    if expected_value is not None:
-        ev_display = (
-            expected_value / 100
-            if abs(expected_value) > 1
-            else expected_value
-        )
-
-        statistics.append(
-            "<div class='stat-chip'>"
-            "EV "
-            f"<strong>{format_probability(ev_display)}</strong>"
-            "</div>"
-        )
-
-    if market:
-        statistics.append(
-            "<div class='stat-chip'>"
-            f"{market}"
-            "</div>"
-        )
-
-    if market_scope:
-        statistics.append(
-            "<div class='stat-chip'>"
-            f"{market_scope}"
-            "</div>"
-        )
-
-    if line is not None:
-        statistics.append(
-            "<div class='stat-chip'>"
-            "盤口 "
-            f"<strong>{format_line(line)}</strong>"
-            "</div>"
-        )
-
-    if price_status:
-        statistics.append(
-            "<div class='stat-chip'>"
-            f"{price_status}"
-            "</div>"
-        )
-
-    statistics.extend(
-        movement_chips
-    )
-
-    commentary_class = (
-        "commentary commentary-heavy"
-        if heavy
-        else "commentary"
-    )
-
-    commentary_html = (
-        f"""
-        <div class="{commentary_class}">
-            🗣️ <strong>雨姐短評：</strong>
-            {commentary}
-        </div>
-        """
-        if commentary
-        else ""
-    )
-
-    render_html(
-        f"""
-        <div class="recommendation-card {card_class}">
-            <span class="tier-pill {tier_class}">
-                {tier_label}
-            </span>
-
-            <span class="{period_class}">
-                {period_label}
-            </span>
-
-            {heavy_html}
-
-            <div class="rec-title">
-                {title}{odds_html}
-            </div>
-
-            <div class="star-row">
-                {"⭐" * stars}
-            </div>
-
-            <div class="rec-stats">
-                {"".join(statistics)}
-            </div>
-
-            {commentary_html}
-            {result_badge(row.get("result"))}
-        </div>
-        """
-    )
-
-    status = normalize_status(
-        row.get("status")
-    )
-
-    if (
-        allow_selection
-        and status != "ended"
-        and rec_id
+    for book in input_data.get(
+        "sharp_books",
+        [],
     ):
-        widget_key = (
-            f"pick_checkbox_{rec_id}"
-        )
-
-        if widget_key not in st.session_state:
-            st.session_state[
-                widget_key
-            ] = rec_id in selected_ids()
-
-        st.checkbox(
-            "加入「我的選擇」",
-            key=widget_key,
-            on_change=update_pick_selection,
-            args=(
-                rec_id,
-                widget_key,
-            ),
-        )
-
-
-# ============================================================
-# 11. Analysis panels (V3)
-# ============================================================
-
-def render_correct_score_cards(
-    scores: List[Dict[str, Any]],
-) -> None:
-    if not scores:
-        return
-
-    columns = st.columns(
-        min(len(scores), 4)
-    )
-
-    for index, score in enumerate(scores):
-        if not isinstance(score, dict):
+        if not isinstance(book, dict):
             continue
 
-        score_text = clean_text(
-            score.get("score")
-        )
-
-        probability = score.get(
-            "probability",
+        markets = book.get(
+            "markets",
             {},
         )
 
-        if not isinstance(probability, dict):
-            probability = {}
+        if not isinstance(markets, dict):
+            continue
 
-        with columns[
-            index % len(columns)
+        for period in [
+            "FT",
+            "HT",
         ]:
-            render_html(
-                f"""
-                <div class="score-card">
-                    <div class="score-value">
-                        {escape(score_text) or "—"}
-                    </div>
+            block = markets.get(
+                period,
+                {},
+            )
 
-                    <div class="score-note">
-                        保守概率
-                        <strong>
-                            {format_probability(
-                                probability.get(
-                                    "minimum"
-                                ),
-                                2,
-                            )}
-                        </strong>
-                    </div>
+            if (
+                isinstance(block, dict)
+                and block.get(
+                    "CORRECT_SCORE"
+                )
+            ):
+                raise ValueError(
+                    "Engine V3 不接受 CORRECT_SCORE 作為"
+                    "尖銳市場約束。請移除 sharp_books 內的 "
+                    "CORRECT_SCORE。波膽參考會由 FT 模型"
+                    "自動產生。"
+                )
 
-                    <div class="score-note">
-                        中位概率
-                        <strong>
-                            {format_probability(
-                                probability.get(
-                                    "median"
-                                ),
-                                2,
-                            )}
-                        </strong>
-                    </div>
+    for candidate in input_data.get(
+        "hkjc_markets",
+        [],
+    ):
+        if not isinstance(candidate, dict):
+            continue
 
-                    <div class="score-note">
-                        公平賠率
-                        <strong>
-                            {format_odds(
-                                score.get(
-                                    "central_fair_odds"
-                                ),
-                                2,
-                            )}
-                        </strong>
-                    </div>
-                </div>
-                """
+        market = optional_text(
+            candidate.get("market")
+        ).upper()
+
+        if market in {
+            "CORRECT_SCORE",
+            "EXACT_SCORE",
+            "CS",
+        }:
+            raise ValueError(
+                "Engine V3 不接受 CORRECT_SCORE 作為 "
+                "HKJC 候選盤。請移除此候選盤。"
+                "波膽參考會由 FT 模型自動產生。"
             )
 
 
-def render_movement_audit_panel(
-    analysis: Dict[str, Any],
-) -> None:
-    audits = parse_json_field(
-        analysis.get(
-            "movement_audits_json"
+def normalize_v3_input(
+    input_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(input_data, dict):
+        raise ValueError(
+            "輸入 JSON 最外層必須是 object。"
+        )
+
+    data = deepcopy(
+        input_data
+    )
+
+    reject_unsupported_correct_score_inputs(
+        data
+    )
+
+    settings = data.setdefault(
+        "settings",
+        {},
+    )
+
+    if not isinstance(settings, dict):
+        raise ValueError(
+            "settings 必須是 object。"
+        )
+
+    settings.setdefault(
+        "devig_methods",
+        [
+            "MULTIPLICATIVE",
+            "POWER",
+            "SHIN",
+        ],
+    )
+
+    features = settings.setdefault(
+        "features",
+        {},
+    )
+
+    if not isinstance(features, dict):
+        features = {}
+        settings["features"] = features
+
+    features.setdefault(
+        "quality_gate",
+        True,
+    )
+
+    features.setdefault(
+        "stress_audit",
+        True,
+    )
+
+    features.setdefault(
+        "family_out_audit",
+        True,
+    )
+
+    features.setdefault(
+        "adaptive_grids",
+        True,
+    )
+
+    features.setdefault(
+        "ht_ft_coherence",
+        True,
+    )
+
+    features.setdefault(
+        "prior_comparison",
+        True,
+    )
+
+    features.setdefault(
+        "odds_shift_analysis",
+        True,
+    )
+
+    movement = settings.setdefault(
+        "movement",
+        {},
+    )
+
+    if not isinstance(movement, dict):
+        movement = {}
+        settings["movement"] = movement
+
+    movement.setdefault(
+        "neutral_threshold_pp",
+        0.50,
+    )
+
+    movement.setdefault(
+        "strong_threshold_pp",
+        2.00,
+    )
+
+    movement.setdefault(
+        "minimum_external_books",
+        2,
+    )
+
+    movement.setdefault(
+        "minimum_agreement",
+        0.60,
+    )
+
+    movement.setdefault(
+        "strong_agreement",
+        0.75,
+    )
+
+    movement.setdefault(
+        "adjacent_line_tolerance",
+        0.50,
+    )
+
+    data.setdefault(
+        "odds_movements",
+        [],
+    )
+
+    return data
+
+
+# ============================================================
+# 7. Cached engine execution
+# ============================================================
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=24,
+)
+def cached_engine_run(
+    canonical_json: str,
+    engine_fingerprint: str,
+) -> Dict[str, Any]:
+    del engine_fingerprint
+
+    return aegis.run_engine(
+        json.loads(
+            canonical_json
         )
     )
 
-    if not isinstance(audits, list) or not audits:
-        st.info(
-            "本場沒有可用的結構化走勢審計資料。"
+
+def engine_fingerprint() -> str:
+    content = b""
+
+    modules = [
+        aegis_v2,
+        aegis,
+    ]
+
+    seen_paths = set()
+
+    for module in modules:
+        path = getattr(
+            module,
+            "__file__",
+            None,
         )
 
-        return
-
-    rows: List[Dict[str, Any]] = []
-
-    for audit in audits:
-        if not isinstance(audit, dict):
+        if (
+            not path
+            or path in seen_paths
+        ):
             continue
 
+        seen_paths.add(
+            path
+        )
+
+        try:
+            with open(
+                path,
+                "rb",
+            ) as file:
+                content += file.read()
+
+        except OSError:
+            content += optional_text(
+                path
+            ).encode("utf-8")
+
+    return hashlib.sha256(
+        content
+    ).hexdigest()
+
+
+def execute_engine(
+    input_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    normalized = normalize_v3_input(
+        input_data
+    )
+
+    canonical = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=json_default,
+    )
+
+    fingerprint = engine_fingerprint()
+
+    analysis_hash = hashlib.sha256(
+        (
+            canonical
+            + fingerprint
+        ).encode("utf-8")
+    ).hexdigest()
+
+    if (
+        st.session_state.get(
+            "analysis_hash"
+        )
+        == analysis_hash
+        and st.session_state.get(
+            "result"
+        )
+        is not None
+    ):
+        return st.session_state[
+            "result"
+        ]
+
+    result = cached_engine_run(
+        canonical,
+        fingerprint,
+    )
+
+    st.session_state[
+        "analysis_hash"
+    ] = analysis_hash
+
+    st.session_state[
+        "result"
+    ] = result
+
+    st.session_state[
+        "input_snapshot"
+    ] = result.get(
+        "input_snapshot",
+        normalized,
+    )
+
+    return result
+
+
+# ============================================================
+# 8. Result renderers
+# ============================================================
+
+def recommendation_card(
+    recommendation: Dict[str, Any],
+) -> None:
+    rank = recommendation.get(
+        "rank",
+        recommendation.get(
+            "official_rank",
+            "—",
+        ),
+    )
+
+    hit_min = probability_value(
+        recommendation,
+        "hit",
+        "minimum",
+    )
+
+    hit_median = probability_value(
+        recommendation,
+        "hit",
+        "median",
+    )
+
+    nonloss = probability_value(
+        recommendation,
+        "nonloss",
+        "minimum",
+    )
+
+    full_loss = probability_value(
+        recommendation,
+        "full_loss",
+        "maximum",
+    )
+
+    ev_min = summary_value(
+        recommendation,
+        "expected_return",
+        "minimum",
+    )
+
+    shift = recommendation.get(
+        "odds_shift",
+        {},
+    )
+
+    shift_text = ""
+
+    if isinstance(shift, dict):
+        verdict = shift.get(
+            "verdict"
+        )
+
+        strength = shift.get(
+            "strength"
+        )
+
+        if verdict:
+            shift_text = (
+                "<br>市場走勢："
+                f"<b>{html_escape(status_chinese(verdict))}</b>"
+                "｜強度："
+                f"<b>{html_escape(status_chinese(strength))}</b>"
+            )
+
+    st.markdown(
+        f"""
+        <div class="recommendation-card">
+            <div class="period-badge">
+                {html_escape(recommendation.get("period", "FT"))}
+            </div>
+            <div class="recommendation-rank">
+                OFFICIAL PICK #{html_escape(rank)}
+            </div>
+            <div class="recommendation-name">
+                {html_escape(recommendation.get("label", "—"))}
+            </div>
+            <div class="recommendation-stats">
+                HKJC 賠率：
+                <b>{format_odds(recommendation.get("hkjc_odds"))}</b>
+                ｜保守命中率：
+                <b>{format_probability(hit_min)}</b>
+                ｜中位命中率：
+                <b>{format_probability(hit_median)}</b>
+                ｜保守不輸率：
+                <b>{format_probability(nonloss)}</b>
+                <br>
+                最大全輸率：
+                <b>{format_probability(full_loss)}</b>
+                ｜保守 EV：
+                <b>{format_ev(ev_min)}</b>
+                ｜價格：
+                <b>{html_escape(
+                    status_chinese(
+                        recommendation.get("price_status")
+                    )
+                )}</b>
+                {shift_text}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def candidate_dataframe(
+    candidates: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    rows = []
+
+    for candidate in candidates:
+        shift = candidate.get(
+            "odds_shift",
+            {},
+        )
+
+        if not isinstance(shift, dict):
+            shift = {}
+
+        prior_comparison = candidate.get(
+            "pre_projection_prior_comparison",
+            {},
+        )
+
+        disparity = (
+            prior_comparison.get(
+                "disparity",
+                {},
+            )
+            if isinstance(
+                prior_comparison,
+                dict,
+            )
+            else {}
+        )
+
+        reasons = []
+
+        for key in [
+            "exclusion_reasons",
+            "official_exclusion_reasons",
+        ]:
+            values = candidate.get(
+                key,
+                [],
+            )
+
+            if isinstance(values, list):
+                reasons.extend(
+                    optional_text(value)
+                    .replace("_", " ")
+                    for value in values
+                )
+
+        rows.append({
+            "正式": (
+                "✅"
+                if candidate.get("official")
+                else ""
+            ),
+            "排名": candidate.get(
+                "official_rank"
+            ),
+            "ID": candidate.get("id"),
+            "候選盤": candidate.get(
+                "label"
+            ),
+            "時段": candidate.get(
+                "period"
+            ),
+            "市場": candidate.get(
+                "market"
+            ),
+            "HKJC 賠率": candidate.get(
+                "hkjc_odds"
+            ),
+            "保守命中率": format_probability(
+                probability_value(
+                    candidate,
+                    "hit",
+                    "minimum",
+                )
+            ),
+            "中位命中率": format_probability(
+                probability_value(
+                    candidate,
+                    "hit",
+                    "median",
+                )
+            ),
+            "保守不輸率": format_probability(
+                probability_value(
+                    candidate,
+                    "nonloss",
+                    "minimum",
+                )
+            ),
+            "保守 EV": format_ev(
+                summary_value(
+                    candidate,
+                    "expected_return",
+                    "minimum",
+                )
+            ),
+            "價格": status_chinese(
+                candidate.get(
+                    "price_status"
+                )
+            ),
+            "Prior 差距": format_probability(
+                disparity.get(
+                    "median_hit_range"
+                ),
+                2,
+            ),
+            "走勢": status_chinese(
+                shift.get(
+                    "verdict",
+                    "NOT_AVAILABLE",
+                )
+            ),
+            "走勢強度": status_chinese(
+                shift.get(
+                    "strength",
+                    "NONE",
+                )
+            ),
+            "市場變動": (
+                f"{safe_float(shift.get('market_implied_probability_change_pp'), 0.0):+.2f}pp"
+                if safe_float(shift.get("market_implied_probability_change_pp")) is not None
+                else "—"
+            ),
+            "排除原因": "；".join(
+                reasons
+            ),
+        })
+
+    return pd.DataFrame(
+        rows
+    )
+
+
+def prior_dataframe(
+    candidate: Dict[str, Any],
+) -> pd.DataFrame:
+    comparison = candidate.get(
+        "pre_projection_prior_comparison",
+        {},
+    )
+
+    priors = (
+        comparison.get(
+            "priors",
+            {},
+        )
+        if isinstance(
+            comparison,
+            dict,
+        )
+        else {}
+    )
+
+    rows = []
+
+    for prior_name in [
+        "DIXON_COLES",
+        "INDEPENDENT_POISSON",
+        "COM_POISSON",
+    ]:
+        record = priors.get(
+            prior_name,
+            {},
+        )
+
+        if not record.get(
+            "available"
+        ):
+            rows.append({
+                "Prior": prior_name,
+                "可用": "否",
+                "情境數": 0,
+                "最低命中率": "—",
+                "中位命中率": "—",
+                "最高命中率": "—",
+                "中位 EV": "—",
+                "中位公平賠率": "—",
+            })
+            continue
+
+        hit = (
+            record.get(
+                "probability",
+                {},
+            ).get(
+                "hit",
+                {},
+            )
+        )
+
+        expected_return = record.get(
+            "expected_return",
+            {},
+        )
+
+        fair_odds = record.get(
+            "fair_odds",
+            {},
+        )
+
+        rows.append({
+            "Prior": prior_name,
+            "可用": "是",
+            "情境數": record.get(
+                "scenario_count"
+            ),
+            "最低命中率": format_probability(
+                hit.get("minimum"),
+                2,
+            ),
+            "中位命中率": format_probability(
+                hit.get("median"),
+                2,
+            ),
+            "最高命中率": format_probability(
+                hit.get("maximum"),
+                2,
+            ),
+            "中位 EV": format_ev(
+                expected_return.get(
+                    "median"
+                )
+            ),
+            "中位公平賠率": format_odds(
+                fair_odds.get(
+                    "median"
+                )
+            ),
+        })
+
+    return pd.DataFrame(
+        rows
+    )
+
+
+def movement_dataframe(
+    audits: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    rows = []
+
+    for audit in audits:
         primary = audit.get(
             "pinnacle_confirmation",
             {},
         )
-
-        if not isinstance(primary, dict):
-            primary = {}
 
         hkjc = audit.get(
             "hkjc_response",
             {},
         )
 
-        if not isinstance(hkjc, dict):
-            hkjc = {}
-
-        change_pp = safe_float(
-            audit.get(
-                "market_implied_probability_change_pp"
-            )
-        )
-
-        sign = (
-            "+"
-            if change_pp is not None
-            and change_pp >= 0
-            else ""
-        )
-
         rows.append({
-            "候選盤": (
-                escape(clean_text(audit.get('label')))
-                + "<br>"
-                + "<small>"
-                + escape(clean_text(audit.get('period'))) + " · "
-                + escape(clean_upper(audit.get('market')))
-                + "</small>"
+            "ID": audit.get("id"),
+            "候選盤": audit.get(
+                "label"
             ),
-            "走勢結果": (
-                '<span class="{cls}">{label} · {strength}</span>'.format(
-                    cls=movement_status_class(audit.get("verdict")),
-                    label=movement_status_chinese(audit.get('verdict')),
-                    strength=movement_status_chinese(audit.get('strength')),
+            "時段": audit.get(
+                "period"
+            ),
+            "市場": audit.get(
+                "market"
+            ),
+            "結果": status_chinese(
+                audit.get(
+                    "verdict"
                 )
             ),
-            "莊家一致": format_probability(
+            "強度": status_chinese(
+                audit.get(
+                    "strength"
+                )
+            ),
+            "外部莊家數": audit.get(
+                "external_book_count"
+            ),
+            "一致比例": format_probability(
                 audit.get(
                     "agreement_ratio"
                 )
@@ -3966,2097 +1471,1798 @@ def render_movement_audit_panel(
                 2,
             ),
             "概率變動": (
-                f"{sign}{change_pp:.2f}pp"
-                if change_pp is not None
+                f"{safe_float(audit.get('market_implied_probability_change_pp'), 0.0):+.2f}pp"
+                if safe_float(audit.get("market_implied_probability_change_pp")) is not None
                 else "—"
             ),
-            "Pinnacle": (
-                movement_status_chinese(
-                    primary.get("status")
+            "Pinnacle": status_chinese(
+                primary.get(
+                    "status"
                 )
             ),
-            "HKJC": (
-                movement_status_chinese(
-                    hkjc.get("status")
+            "HKJC": status_chinese(
+                hkjc.get(
+                    "status"
                 )
             ),
-            "行動提示": escape(
-                clean_text(
-                    audit.get("actionability")
-                ).replace("_", " ")
-            ),
+            "行動提示": optional_text(
+                audit.get(
+                    "actionability"
+                )
+            ).replace("_", " "),
         })
 
-    if not rows:
-        st.info("本場沒有可用的走勢審計資料。")
-        return
+    return pd.DataFrame(
+        rows
+    )
 
-    display = pd.DataFrame(rows)
 
-    st.dataframe(
-        display,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "候選盤": st.column_config.TextColumn(
-                "候選盤",
-                width="medium",
+# ============================================================
+# 9. Portal helpers
+# ============================================================
+
+def configured_api_url() -> str:
+    try:
+        value = optional_text(
+            st.secrets[
+                "portal_api"
+            ]["url"]
+        )
+
+        if value:
+            return value
+
+    except Exception:
+        pass
+
+    return (
+        optional_text(
+            os.getenv(
+                "AEGIS_API_URL"
+            )
+        )
+        or DEFAULT_API_URL
+    )
+
+
+def configured_api_token() -> str:
+    try:
+        value = optional_text(
+            st.secrets[
+                "portal_api"
+            ]["token"]
+        )
+
+        if value:
+            return value
+
+    except Exception:
+        pass
+
+    return optional_text(
+        os.getenv(
+            "AEGIS_API_TOKEN"
+        )
+    )
+
+
+def portal_request(
+    payload: Dict[str, Any],
+    timeout: int = 40,
+) -> Dict[str, Any]:
+    token = configured_api_token()
+
+    if not token:
+        raise ValueError(
+            "Portal API token 未設定。"
+        )
+
+    request_payload = deepcopy(
+        payload
+    )
+
+    request_payload[
+        "token"
+    ] = token
+
+    request = urllib.request.Request(
+        configured_api_url(),
+        data=json.dumps(
+            request_payload,
+            ensure_ascii=False,
+            default=json_default,
+        ).encode("utf-8"),
+        method="POST",
+        headers={
+            "Content-Type": (
+                "application/json; charset=utf-8"
+            ),
+            "Accept": "application/json",
+            "User-Agent": (
+                f"AEGIS-ULTRA/{APP_VERSION}"
             ),
         },
     )
 
-
-def render_family_out_panel(
-    analysis: Dict[str, Any],
-) -> None:
-    family = parse_json_field(
-        analysis.get(
-            "family_out_json"
-        )
-    )
-
-    if not isinstance(family, dict) or not family:
-        st.info("本場沒有 family-out 穩健性資料。")
-        return
-
-    rows: List[Dict[str, Any]] = []
-
-    for key, record in family.items():
-        if not isinstance(record, dict):
-            continue
-
-        probability = record.get(
-            "probability",
-            {},
-        )
-
-        if not isinstance(probability, dict):
-            probability = {}
-
-        hit = probability.get(
-            "hit",
-            {},
-        )
-
-        if not isinstance(hit, dict):
-            hit = {}
-
-        rows.append({
-            "候選盤": escape(
-                clean_text(
-                    record.get("label") or key
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=timeout,
+        ) as response:
+            text = (
+                response.read()
+                .decode(
+                    "utf-8-sig",
+                    errors="replace",
                 )
-            ),
-            "結果": (
-                '<span class="{cls}">{label}</span>'.format(
-                    cls=movement_status_class(record.get("verdict")),
-                    label=movement_status_chinese(record.get('verdict')),
-                )
-            ),
-            "穩健性": (
-                '<span class="{cls}">{label}</span>'.format(
-                    cls=movement_status_class(record.get("status")),
-                    label=robustness_status_chinese(record.get('status')),
-                )
-            ),
-            "最低命中率": format_probability(
-                hit.get("minimum"),
-                2,
-            ),
-            "中位命中率": format_probability(
-                hit.get("median"),
-                2,
-            ),
-        })
-
-    if not rows:
-        st.info("本場沒有 family-out 資料。")
-        return
-
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-def render_stress_panel(
-    analysis: Dict[str, Any],
-) -> None:
-    stress = parse_json_field(
-        analysis.get(
-            "stress_audits_json"
-        )
-    )
-
-    if not isinstance(stress, dict) or not stress:
-        st.info("本場沒有壓力測試資料。")
-        return
-
-    rows: List[Dict[str, Any]] = []
-
-    for candidate_key, candidate_stress in stress.items():
-        if not isinstance(
-            candidate_stress,
-            dict,
-        ):
-            continue
-
-        label = candidate_stress.get(
-            "label"
-        ) or candidate_key
-
-        for level_key, level_label in [
-            ("light", "輕度"),
-            ("medium", "中度"),
-            ("heavy", "重度"),
-        ]:
-            record = candidate_stress.get(
-                level_key,
-                {},
             )
 
-            if not isinstance(record, dict):
-                continue
-
-            rows.append({
-                "候選盤": escape(
-                    clean_text(label)
-                ),
-                "程度": level_label,
-                "最低命中率": format_probability(
-                    record.get(
-                        "minimum_hit_probability"
-                    )
-                ),
-                "中位命中率": format_probability(
-                    record.get(
-                        "median_hit_probability"
-                    )
-                ),
-                "情境數": record.get(
-                    "scenario_count"
-                ),
-            })
-
-    if not rows:
-        st.info("本場沒有壓力測試資料。")
-        return
-
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-def render_prior_panel(
-    analysis: Dict[str, Any],
-) -> None:
-    prior = parse_json_field(
-        analysis.get(
-            "prior_comparison_json"
+    except urllib.error.HTTPError as error:
+        text = (
+            error.read()
+            .decode(
+                "utf-8-sig",
+                errors="replace",
+            )
         )
+
+        raise RuntimeError(
+            f"API HTTP {error.code}: {text}"
+        ) from error
+
+    except urllib.error.URLError as error:
+        raise RuntimeError(
+            f"無法連接 Portal API："
+            f"{error.reason}"
+        ) from error
+
+    result = json.loads(
+        text
     )
 
-    if not isinstance(prior, dict) or not prior:
-        st.info("本場沒有 prior 比較資料。")
-        return
+    if (
+        not isinstance(result, dict)
+        or result.get("ok") is not True
+    ):
+        raise RuntimeError(
+            "Portal API 拒絕要求："
+            + optional_text(
+                result.get("error")
+                if isinstance(result, dict)
+                else result
+            )
+        )
 
-    priors = prior.get(
-        "priors",
+    return result
+
+
+def stable_match_id(
+    result: Dict[str, Any],
+) -> str:
+    match = result.get(
+        "match",
         {},
     )
 
-    if not isinstance(priors, dict) or not priors:
-        st.info("本場沒有 prior 比較資料。")
-        return
+    identity = "|".join([
+        optional_text(
+            match.get("home")
+        ).casefold(),
+        optional_text(
+            match.get("away")
+        ).casefold(),
+        optional_text(
+            match.get("competition")
+        ).casefold(),
+        optional_text(
+            match.get("kickoff")
+        ),
+    ])
 
-    rows: List[Dict[str, Any]] = []
+    digest = hashlib.sha256(
+        identity.encode("utf-8")
+    ).hexdigest()[:20]
 
-    for prior_name, prior_record in priors.items():
-        if not isinstance(prior_record, dict):
+    return f"match_{digest}"
+
+
+def build_portal_bundle(
+    result: Dict[str, Any],
+    selected_ids: set,
+    publish_status: str,
+) -> Dict[str, Any]:
+    match = result.get(
+        "match",
+        {},
+    )
+
+    match_id = stable_match_id(
+        result
+    )
+
+    records = []
+
+    candidates = result.get(
+        "candidate_markets",
+        [],
+    )
+
+    for candidate in candidates:
+        candidate_id = optional_text(
+            candidate.get("id")
+        )
+
+        if candidate_id not in selected_ids:
             continue
 
-        rows.append({
-            "Prior": escape(
-                clean_text(prior_name)
+        shift = candidate.get(
+            "odds_shift",
+            {},
+        )
+
+        if not isinstance(shift, dict):
+            shift = {}
+
+        family_out = candidate.get(
+            "family_out_audit",
+            {},
+        )
+
+        if not isinstance(family_out, dict):
+            family_out = {}
+
+        identity = "|".join([
+            match_id,
+            candidate_id,
+            optional_text(
+                candidate.get("period")
             ),
-            "中位命中率": format_probability(
-                prior_record.get(
-                    "median_hit"
-                )
+            optional_text(
+                candidate.get("market")
             ),
-            "最低命中率": format_probability(
-                prior_record.get(
-                    "minimum_hit"
-                )
+            optional_text(
+                candidate.get("selection")
             ),
-            "中位 EV": format_ev(
-                prior_record.get(
-                    "median_expected_return"
-                )
+            optional_text(
+                candidate.get("line")
             ),
-            "備註": escape(
-                clean_text(
-                    prior_record.get("note")
+        ])
+
+        rec_id = (
+            "rec_"
+            + hashlib.sha256(
+                identity.encode("utf-8")
+            ).hexdigest()[:22]
+        )
+
+        records.append({
+            "rec_id": rec_id,
+            "match_id": match_id,
+            "tier": (
+                "OFFICIAL"
+                if candidate.get("official")
+                else "ALTERNATIVE"
+            ),
+            "rank": (
+                candidate.get(
+                    "official_rank"
                 )
+                or 999
+            ),
+            "rec_title": candidate.get(
+                "label"
+            ),
+            "market": candidate.get(
+                "market"
+            ),
+            "selection": candidate.get(
+                "selection"
+            ),
+            "line": (
+                candidate.get("line")
+                if candidate.get("line")
+                is not None
+                else ""
+            ),
+            "odds": candidate.get(
+                "hkjc_odds"
+            ),
+            "conservative_hit": probability_value(
+                candidate,
+                "hit",
+                "minimum",
+            ),
+            "median_hit": probability_value(
+                candidate,
+                "hit",
+                "median",
+            ),
+            "nonloss_probability": probability_value(
+                candidate,
+                "nonloss",
+                "minimum",
+            ),
+            "full_loss_probability": probability_value(
+                candidate,
+                "full_loss",
+                "maximum",
+            ),
+            "fair_odds": summary_value(
+                candidate,
+                "fair_odds",
+                "maximum",
+            ),
+            "price_status": candidate.get(
+                "price_status"
+            ),
+            "commentary": "",
+            "stars": (
+                4
+                if candidate.get("official")
+                else 3
+            ),
+            "is_heavy": False,
+            "compatibility_group": "",
+            "conflict_ids": "",
+            "result": "pending",
+            "status": publish_status,
+            "period": candidate.get(
+                "period"
+            ),
+            "market_scope": (
+                candidate.get("team")
+                or ""
+            ),
+            "edge": "",
+            "expected_value": summary_value(
+                candidate,
+                "expected_return",
+                "minimum",
+            ),
+
+            # ---- Aegis v3 telemetry ----
+            "movement_verdict": (
+                shift.get("verdict")
+                if isinstance(shift, dict)
+                else None
+            ),
+            "movement_strength": (
+                shift.get("strength")
+                if isinstance(shift, dict)
+                else None
+            ),
+            "movement_agreement_ratio": (
+                shift.get("agreement_ratio")
+                if isinstance(shift, dict)
+                else None
+            ),
+            "movement_probability_change_pp": (
+                shift.get(
+                    "market_implied_probability_change_pp"
+                )
+                if isinstance(shift, dict)
+                else None
+            ),
+            "family_out_status": (
+                family_out.get("status")
+                if isinstance(family_out, dict)
+                else None
             ),
         })
 
-    if not rows:
-        st.info("本場沒有 prior 比較資料。")
-        return
-
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
+    movement = result.get(
+        "odds_shift_analysis",
+        {},
     )
 
+    if not isinstance(family_out, dict):
+        family_out = {}
 
-def render_analysis_panels(
-    analysis: Optional[Dict[str, Any]],
-) -> None:
-    if not analysis:
-        return
-
-    has_movement = parse_json_field(
-        analysis.get(
-            "movement_audits_json"
-        )
+    # ---- V3 FIX: 從每條 recommendation 聚合 family_out / stress / prior_comparison ----
+    recommendations_list = result.get(
+        "recommendations",
+        [],
     )
 
-    has_family = parse_json_field(
-        analysis.get(
-            "family_out_json"
-        )
-    )
-
-    has_stress = parse_json_field(
-        analysis.get(
-            "stress_audits_json"
-        )
-    )
-
-    has_prior = parse_json_field(
-        analysis.get(
-            "prior_comparison_json"
-        )
-    )
-
-    if not any([
-        has_movement,
-        has_family,
-        has_stress,
-        has_prior,
-    ]):
-        return
-
-    engine_version = escape(
-        clean_text(
-            analysis.get("engine_version")
-        )
-    )
-
-    runtime = safe_float(
-        analysis.get("runtime_seconds")
-    )
-
-    quality = movement_status_chinese(
-        analysis.get(
-            "model_quality_status"
-        )
-    )
-
-    coherence = movement_status_chinese(
-        analysis.get(
-            "ht_ft_coherence_status"
-        )
-    )
-
-    metric_cols = st.columns(4)
-
-    with metric_cols[0]:
-        st.metric(
-            "模型質量",
-            quality,
-        )
-
-    with metric_cols[1]:
-        st.metric(
-            "HT-FT 一致性",
-            coherence,
-        )
-
-    with metric_cols[2]:
-        st.metric(
-            "引擎版本",
-            engine_version or "—",
-        )
-
-    with metric_cols[3]:
-        st.metric(
-            "運行時長",
-            (
-                f"{runtime:.1f}s"
-                if runtime is not None
-                else "—"
-            ),
-        )
-
-    with st.expander(
-        "📈 市場走勢審計（Odds Movement）",
-        expanded=False,
-    ):
-        render_movement_audit_panel(
-            analysis
-        )
-
-    with st.expander(
-        "🛡️ Family-out 穩健性",
-        expanded=False,
-    ):
-        render_family_out_panel(
-            analysis
-        )
-
-    with st.expander(
-        "🔥 壓力測試（Stress Audit）",
-        expanded=False,
-    ):
-        render_stress_panel(
-            analysis
-        )
-
-    with st.expander(
-        "🎲 Prior 比較（Dixon-Coles / "
-        "Independent Poisson / COM-Poisson）",
-        expanded=False,
-    ):
-        render_prior_panel(
-            analysis
-        )
-
-
-# ============================================================
-# 12. Match renderer
-# ============================================================
-
-def match_title(
-    match: Dict[str, Any],
-    match_recommendations: pd.DataFrame,
-) -> str:
-    status = normalize_status(
-        match.get("status")
-    )
-
-    name = clean_text(
-        match.get("match_name")
-    )
-
-    if not name:
-        home = clean_text(
-            match.get("home_team")
-        )
-
-        away = clean_text(
-            match.get("away_team")
-        )
-
-        if home and away:
-            name = f"{home} vs {away}"
-        else:
-            name = clean_identifier(
-                match.get("match_id")
-            )
-
-    return name
-
-
-def render_match(
-    match: Dict[str, Any],
-    recommendations: pd.DataFrame,
-    analysis: Optional[Dict[str, Any]] = None,
-) -> None:
-    match_id = clean_identifier(
-        match.get("match_id")
-    )
-
-    # ---- DEBUG: 顯示 analysis 是否載入成功 ----
-    if st.session_state.get("_debug_analysis", False):
-        if analysis is None:
-            st.warning(
-                f"⚠️ match_id={match_id} → analysis 為 None"
-            )
-        else:
-            st.success(
-                f"✅ match_id={match_id} → analysis 已載入 "
-                f"({len(analysis)} 欄位)"
-            )
-
-    match_recommendations = (
-        recommendations[
-            recommendations["match_id"]
-            .map(clean_identifier)
-            .eq(match_id)
-        ].copy()
-    )
-
-    if match_recommendations.empty:
-        return
-
-    match_recommendations[
-        "_tier_order"
-    ] = (
-        match_recommendations["tier"]
-        .map(TIER_ORDER)
-        .fillna(9)
-    )
-
-    match_recommendations[
-        "_period_order"
-    ] = (
-        match_recommendations["period"]
-        .map({
-            "FT": 0,
-            "HT": 1,
-            "2H": 2,
-        })
-        .fillna(9)
-    )
-
-    match_recommendations = (
-        match_recommendations.sort_values(
-            by=[
-                "_tier_order",
-                "_period_order",
-                "rank",
-            ],
-            ascending=True,
-            na_position="last",
-        )
-    )
-
-    title = match_title(
-        match,
-        match_recommendations,
-    )
-
-    status = normalize_status(
-        match.get("status")
-    )
-
-    has_heavy = (
-        match_recommendations[
-            "is_heavy"
-        ].map(safe_bool).any()
-    )
-
-    heading_classes = [
-        "match-heading",
-    ]
-
-    if has_heavy:
-        heading_classes.append(
-            "match-heading-heavy"
-        )
-
-    if status == "ended":
-        heading_classes.append(
-            "match-heading-ended"
-        )
-
-    competition = escape(
-        match.get("competition")
-    )
-
-    kickoff = escape(
-        match.get("kickoff")
-    )
-
-    model_direction = escape(
-        match.get("model_direction")
-    )
-
-    model_summary = escape(
-        match.get("model_summary")
-    )
-
-    final_score = escape(
-        match.get("final_score")
-    )
-
-    meta_parts = [
-        item
-        for item in [
-            competition,
-            kickoff,
-        ]
-        if item
-    ]
-
-    meta_html = " · ".join(
-        meta_parts
-    )
-
-    direction_html = (
-        f"""
-        <div class="model-direction">
-            <strong>Ultra V3 模型方向：</strong>
-            {model_direction}
-        </div>
-        """
-        if model_direction
-        else ""
-    )
-
-    summary_html = (
-        f"""
-        <div class="model-summary">
-            {model_summary}
-        </div>
-        """
-        if model_summary
-        else ""
-    )
-
-    final_html = (
-        f"""
-        <div class="score-summary">
-            <strong>完場比分：</strong>
-            {final_score}
-        </div>
-        """
-        if final_score
-        else ""
-    )
-
-    # ---- V3 correct-score fallback from analysis ----
-    correct_scores = parse_json_field(
-        analysis.get(
-            "correct_scores_json"
-        )
-        if analysis is not None
-        else None
-    ) if analysis is not None else None
-
-    cs_html = ""
-
-    if correct_scores and isinstance(
-        correct_scores,
-        list,
-    ) and correct_scores:
-        cs_html = (
-            '<div class="score-summary">'
-            "<strong>🎯 波膽參考（V3 自動生成）：</strong>"
-            "</div>"
-        )
-
-    # movement hint in heading
-    movement_status = ""
-
-    if analysis is not None:
-        mv = clean_upper(
-            analysis.get(
-                "odds_movement_status"
-            )
-        )
-
-        if mv:
-            movement_status = (
-                '<span class="period-pill {cls}">📈 {label}</span> '.format(
-                    cls=movement_status_class(mv),
-                    label=movement_status_chinese(mv),
-                )
-            )
-
-    with st.expander(
-        title,
-        expanded=False,
-    ):
-        render_html(
-            f"""
-            <div class="{' '.join(heading_classes)}">
-                <div class="match-name">
-                    {movement_status}
-                    {escape(match.get("match_name"))}
-                </div>
-
-                <div class="match-meta">
-                    {meta_html}
-                </div>
-
-                {direction_html}
-                {summary_html}
-                {final_html}
-                {cs_html}
-            </div>
-            """
-        )
-
-        # ---- Correct-score reference cards ----
-        if correct_scores and isinstance(
-            correct_scores,
-            list,
-        ) and correct_scores:
-            st.markdown(
-                "#### 🎯 FT 波膽參考"
-            )
-
-            st.caption(
-                "波膽由 FT 模型自動生成，屬高風險參考；"
-                "同一場的不同比分互相排斥。"
-            )
-
-            render_correct_score_cards(
-                correct_scores
-            )
-
-        # ---- V3 analysis panels ----
-        if analysis is not None:
-            render_analysis_panels(
-                analysis
-            )
-
-        official = match_recommendations[
-            match_recommendations["tier"]
-            .eq("OFFICIAL")
-        ]
-
-        alternatives = match_recommendations[
-            match_recommendations["tier"]
-            .eq("ALTERNATIVE")
-        ]
-
-        scores = match_recommendations[
-            match_recommendations["tier"]
-            .eq("CORRECT_SCORE")
-        ]
-
-        has_cs = (
-            correct_scores is not None
-            and isinstance(correct_scores, list)
-            and bool(correct_scores)
-        )
-
-        tab_labels = [
-            "✅ 官方推薦 ({n})".format(n=len(official)),
-            "⚡ 進取選擇 ({n})".format(n=len(alternatives)),
-        ]
-
-        if not scores.empty or has_cs:
-            tab_labels.append(
-                "🎯 波膽 ({n})".format(
-                    n=len(scores) + (1 if has_cs else 0)
-                )
-            )
-
-        official_tab, alternative_tab, *rest = (
-            st.tabs(tab_labels)
-        )
-
-        score_tab = rest[0] if rest else None
-
-        with official_tab:
-            if official.empty:
-                st.info("本場未有官方推薦。")
-            else:
-                for _, row in official.iterrows():
-                    render_recommendation(
-                        row.to_dict()
-                    )
-
-        with alternative_tab:
-            if alternatives.empty:
-                st.info(
-                    "本場未有額外進取選擇。"
-                )
-            else:
-                st.caption(
-                    "進取選擇不等同官方推薦。"
-                    "會員可按個人賠率、市場及風險偏好選擇。"
-                )
-
-                for _, row in alternatives.iterrows():
-                    render_recommendation(
-                        row.to_dict()
-                    )
-
-        if score_tab is not None:
-            with score_tab:
-                if not scores.empty:
-                    st.warning(
-                        "以下為手動上架的波膽推薦。"
-                    )
-
-                    for _, row in scores.iterrows():
-                        render_recommendation(
-                            row.to_dict()
+    # family_out: 聚合所有被選中 recommendation 的 family_out_audit
+    family_out_global = {
+        "scenarios": [],
+        "scenario_count": 0,
+        "status": None,
+    }
+
+    for rec in recommendations_list:
+        if not isinstance(rec, dict):
+            continue
+        fo = rec.get("family_out_audit")
+        if isinstance(fo, dict):
+            # 收集 scenarios
+            rec_scenarios = fo.get("scenarios", [])
+            if isinstance(rec_scenarios, list):
+                for s in rec_scenarios:
+                    if isinstance(s, dict):
+                        s_copy = dict(s)
+                        s_copy["_rec_id"] = rec.get("id", "")
+                        s_copy["_rec_label"] = rec.get("label", "")
+                        family_out_global["scenarios"].append(
+                            s_copy
                         )
 
-                if has_cs:
-                    st.markdown(
-                        "**模型自動生成波膽參考**"
+            # 取第一個有意義的 status
+            if family_out_global["status"] is None:
+                family_out_global["status"] = fo.get("status")
+
+    family_out_global["scenario_count"] = len(
+        family_out_global["scenarios"]
+    )
+
+    # stress: 聚合所有被選中 recommendation 的 stress_audit
+    stress = {
+        "scenarios": [],
+        "scenario_count": 0,
+    }
+
+    for rec in recommendations_list:
+        if not isinstance(rec, dict):
+            continue
+        sa = rec.get("stress_audit")
+        if isinstance(sa, dict):
+            for level_key in [
+                "light",
+                "medium",
+                "heavy",
+            ]:
+                level_data = sa.get(level_key)
+                if isinstance(level_data, dict):
+                    level_copy = dict(level_data)
+                    level_copy["_level"] = level_key
+                    level_copy["_rec_id"] = rec.get("id", "")
+                    level_copy["_rec_label"] = rec.get("label", "")
+                    stress["scenarios"].append(
+                        level_copy
                     )
 
-                    render_correct_score_cards(
-                        correct_scores
-                    )
-
-
-# ============================================================
-# 13. Filtering
-# ============================================================
-
-def filter_recommendations(
-    recommendations: pd.DataFrame,
-    *,
-    tiers: List[str],
-    periods: List[str],
-    markets: List[str],
-    available_periods: List[str],
-    available_markets: List[str],
-    minimum_odds: float,
-    maximum_odds: float,
-) -> pd.DataFrame:
-    if recommendations.empty:
-        return recommendations
-
-    output = recommendations.copy()
-
-    if not tiers:
-        return output.iloc[0:0]
-
-    output = output[
-        output["tier"].isin(tiers)
-    ]
-
-    if available_periods:
-        if not periods:
-            return output.iloc[0:0]
-
-        output = output[
-            output["period"].isin(periods)
-        ]
-
-    if available_markets:
-        if not markets:
-            return output.iloc[0:0]
-
-        output = output[
-            output["market"].isin(markets)
-        ]
-
-    lower = min(
-        minimum_odds,
-        maximum_odds,
+    stress["scenario_count"] = len(
+        stress["scenarios"]
     )
 
-    upper = max(
-        minimum_odds,
-        maximum_odds,
+    # prior_comparison: 用第一條 recommendation 的
+    prior_comparison = None
+    for rec in recommendations_list:
+        if not isinstance(rec, dict):
+            continue
+        pc = rec.get("pre_projection_prior_comparison")
+        if isinstance(pc, dict):
+            prior_comparison = pc
+            break
+
+    coherence = result.get(
+        "ht_ft_coherence",
+        {},
     )
 
-    score_mask = (
-        output["tier"]
-        .eq("CORRECT_SCORE")
+    model_quality = result.get(
+        "model_quality",
+        {},
     )
 
-    odds_mask = (
-        output["odds"].isna()
-        | (
-            output["odds"].ge(lower)
-            & output["odds"].le(upper)
-        )
+    correct_scores = result.get(
+        "correct_scores",
+        {},
     )
 
-    return output[
-        score_mask | odds_mask
-    ]
+    runtime = result.get(
+        "runtime",
+        {},
+    )
 
+    audits = movement.get(
+        "candidate_audits",
+        [],
+    )
 
-def matching_match_ids(
-    recommendations: pd.DataFrame,
-) -> Set[str]:
-    if recommendations.empty:
-        return set()
+    def _json(value):
+        if value is None:
+            return ""
+
+        return json_text(value)
+
+    analysis = {
+        "match_id": match_id,
+        "model_quality_status": (
+            model_quality.get("status")
+            if isinstance(model_quality, dict)
+            else None
+        ),
+        "ht_ft_coherence_status": (
+            coherence.get("status")
+            if isinstance(coherence, dict)
+            else None
+        ),
+        "odds_movement_status": (
+            movement.get("status")
+            if isinstance(movement, dict)
+            else None
+        ),
+        "model_direction": (
+            "；".join(
+                optional_text(
+                    item.get("label")
+                )
+                for item in result.get(
+                    "recommendations",
+                    [],
+                )
+            )
+            or "沒有正式推薦"
+        ),
+        "engine_version": ENGINE_VERSION,
+        "runtime_seconds": (
+            runtime.get("total_seconds")
+            if isinstance(runtime, dict)
+            else None
+        ),
+        "movement_audits_json": _json(
+            audits
+        ),
+        "family_out_json": _json(
+            family_out_global
+        ),
+        "stress_audits_json": _json(
+            stress
+        ),
+        "prior_comparison_json": _json(
+            prior_comparison
+        ),
+        "correct_scores_json": _json(
+            correct_scores.get(
+                "recommendations",
+                [],
+            )
+            if isinstance(correct_scores, dict)
+            else []
+        ),
+        "consensus_json": _json(
+            movement.get("consensus")
+            if isinstance(movement, dict)
+            else None
+        ),
+    }
 
     return {
-        clean_identifier(value)
-        for value in recommendations[
-            "match_id"
-        ]
-        if clean_identifier(value)
-    }
-
-
-# ============================================================
-# 14. Session setup
-# ============================================================
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if "portal_user" not in st.session_state:
-    st.session_state.portal_user = {}
-
-if "my_pick_ids" not in st.session_state:
-    st.session_state.my_pick_ids = []
-
-
-users_df, raw_matches_df, raw_recommendations_df, raw_analysis_df = (
-    load_portal_data()
-)
-
-parlay_corner_df = fetch_sheet("parlay_corner")
-
-
-# ============================================================
-# 15. Hero
-# ============================================================
-
-render_html(
-    """
-    <div class="portal-hero">
-        <div class="portal-eyebrow">
-            <span class="live-dot"></span>
-            Aegis Ultra V3 · VIP Access
-        </div>
-
-        <h1 class="portal-title">
-    <span class="portal-trophy">🏆</span>
-    雨姐 VIP Match Centre
-        </h1>
-
-        <p class="portal-subtitle">
-            Ultra V3 賽事分析平台，集中顯示官方推薦、
-            進取選擇、半場及全場市場、波膽參考，
-            並檢查重疊、走廊及直接衝突風險。
-            全新升級：市場走勢審計（Odds Movement）、
-            Family-out 穩健性、壓力測試及 Prior 比較。
-        </p>
-
-        <div class="hero-feature-row">
-            <span class="hero-feature">⚽ FT 全場</span>
-            <span class="hero-feature">⏱️ HT 半場</span>
-            <span class="hero-feature">🛡️ 衝突檢查</span>
-            <span class="hero-feature">📊 模型概率</span>
-            <span class="hero-feature">📈 走勢審計</span>
-            <span class="hero-feature">🛡️ 穩健性</span>
-            <span class="hero-feature">🎯 波膽參考</span>
-        </div>
-    </div>
-    """
-)
-
-
-# ============================================================
-# 16. Login
-# ============================================================
-
-if not st.session_state.logged_in:
-    render_html(
-        """
-        <div class="login-shell">
-            <div class="login-icon">
-                🔐
-            </div>
-
-            <div class="login-title">
-                VIP 會員登入
-            </div>
-
-            <div class="login-copy">
-                登入後查看最新 Aegis Ultra V3
-                賽事分析、官方推薦、進取選擇、
-                半場市場、市場走勢審計、穩健性測試
-                及會員專屬波膽參考。
-            </div>
-
-            <div class="login-security">
-                🛡️ Secure Member Access · Ultra V3
-            </div>
-        </div>
-        """
-    )
-
-    with st.form(
-        "client_login_form",
-        clear_on_submit=False,
-    ):
-        username = st.text_input(
-            "用戶名 Username",
-            placeholder="輸入會員帳號",
-        )
-
-        password = st.text_input(
-            "密碼 Password",
-            type="password",
-            placeholder="輸入會員密碼",
-        )
-
-        login_clicked = (
-            st.form_submit_button(
-                "驗證並進入 VIP Match Centre",
-                type="primary",
-                use_container_width=True,
-            )
-        )
-
-    if login_clicked:
-        valid, authenticated_user, message = (
-            authenticate(
-                users_df,
-                username,
-                password,
-            )
-        )
-
-        if (
-            valid
-            and authenticated_user is not None
-        ):
-            status_box = st.empty()
-
-            status_box.info(
-                "🛡️ 正在驗證會員身份..."
-            )
-            time.sleep(0.18)
-
-            status_box.warning(
-                "⚙️ 正在連接 Aegis Ultra V3..."
-            )
-            time.sleep(0.18)
-
-            status_box.success(
-                "✅ 驗證成功。"
-            )
-            time.sleep(0.14)
-
-            status_box.empty()
-
-            st.session_state.logged_in = True
-            st.session_state.portal_user = (
-                authenticated_user
-            )
-
-            st.rerun()
-
-        else:
-            st.error(message)
-
-    st.stop()
-
-
-# ============================================================
-# 17. Validate existing session
-# ============================================================
-
-member_valid, member_message = (
-    validate_logged_in_member(
-        users_df,
-        st.session_state.portal_user,
-    )
-)
-
-if not member_valid:
-    st.session_state.logged_in = False
-    st.session_state.portal_user = {}
-    clear_all_picks()
-
-    st.error(member_message)
-    st.info("請重新登入或聯絡雨姐。")
-    st.stop()
-
-
-# ============================================================
-# 18. Prepare logged-in data
-# ============================================================
-
-recommendations_df = prepare_recommendations(
-    raw_recommendations_df
-)
-
-matches_df = prepare_matches(
-    raw_matches_df,
-    recommendations_df,
-)
-
-analysis_df = prepare_analysis(
-    raw_analysis_df
-)
-
-matches_df, recommendations_df = (
-    visible_records(
-        matches_df,
-        recommendations_df,
-    )
-)
-
-user = st.session_state.portal_user
-
-
-def analysis_for_match(
-    analysis_dataframe: pd.DataFrame,
-    match_id: str,
-) -> Optional[Dict[str, Any]]:
-    """Find and parse the analysis record for a given match_id."""
-    if (
-        analysis_dataframe is None
-        or analysis_dataframe.empty
-        or not match_id
-    ):
-        return None
-
-    target = clean_identifier(match_id)
-
-    if "match_id" not in analysis_dataframe.columns:
-        return None
-
-    matches = analysis_dataframe[
-        analysis_dataframe["match_id"]
-        .map(clean_identifier)
-        .eq(target)
-    ]
-
-    if matches.empty:
-        return None
-
-    return matches.iloc[0].to_dict()
-
-
-def get_analysis_for(
-    match_id: str,
-) -> Optional[Dict[str, Any]]:
-    return analysis_for_match(
-        analysis_df,
-        match_id,
-    )
-
-
-# ============================================================
-# 19. Sidebar
-# ============================================================
-
-with st.sidebar:
-    st.markdown("## 🏆 VIP Control Centre")
-
-    st.success(
-        f"會員：{user.get('username', '')}\n\n"
-        f"到期日：{user.get('expiry_date', '')}"
-    )
-
-    st.caption(
-        f"Aegis Ultra V3 · Portal {APP_VERSION}"
-    )
-
-    st.markdown("---")
-
-    navigation = st.radio(
-        "頁面",
-        [
-            "⚽ Match Centre",
-            "📌 過關專區",
-            "🧺 我的選擇",
-            "📜 完場紀錄",
-        ],
-        label_visibility="collapsed",
-    )
-
-    st.markdown("---")
-    st.markdown("### 🎛️ 顯示設定")
-
-    tier_options = [
-        "OFFICIAL",
-        "ALTERNATIVE",
-        "CORRECT_SCORE",
-    ]
-
-    selected_tiers = st.multiselect(
-        "推薦類別",
-        options=tier_options,
-        default=tier_options,
-        format_func=lambda value: {
-            "OFFICIAL": "✅ 官方推薦",
-            "ALTERNATIVE": "⚡ 進取選擇",
-            "CORRECT_SCORE": "🎯 波膽",
-        }.get(value, value),
-    )
-
-    period_options = sorted(
-        {
-            normalize_period(value)
-            for value in recommendations_df[
-                "period"
-            ]
-            if clean_text(value)
-        },
-        key=lambda value: {
-            "FT": 0,
-            "HT": 1,
-            "2H": 2,
-        }.get(value, 9),
-    )
-
-    selected_periods = st.multiselect(
-        "結算時段",
-        options=period_options,
-        default=period_options,
-        format_func=lambda value: {
-            "FT": "⚽ FT 全場",
-            "HT": "⏱️ HT 半場",
-            "2H": "⏱️ 2H 下半場",
-        }.get(value, value),
-    )
-
-    market_options = sorted({
-        normalize_market(value)
-        for value in recommendations_df[
-            "market"
-        ]
-        if clean_text(value)
-    })
-
-    selected_markets = st.multiselect(
-        "市場",
-        options=market_options,
-        default=market_options,
-    )
-
-    minimum_odds = st.number_input(
-        "最低賠率",
-        min_value=1.01,
-        max_value=100.0,
-        value=1.01,
-        step=0.05,
-        format="%.2f",
-    )
-
-    maximum_odds = st.number_input(
-        "最高賠率",
-        min_value=1.01,
-        max_value=100.0,
-        value=20.0,
-        step=0.10,
-        format="%.2f",
-    )
-
-    if minimum_odds > maximum_odds:
-        st.warning(
-            "最低賠率高於最高賠率；"
-            "系統會自動交換兩者。"
-        )
-
-    competition_options = sorted({
-        clean_text(value)
-        for value in matches_df[
-            "competition"
-        ]
-        if clean_text(value)
-    })
-
-    selected_competitions = st.multiselect(
-        "賽事",
-        options=competition_options,
-        default=competition_options,
-    )
-
-    show_movement_only = st.checkbox(
-        "只顯示有走勢數據的場次",
-        value=False,
-        help=(
-            "勾選後只列出已完成市場走勢審計的場次"
-        ),
-    )
-
-    st.markdown("---")
-
-    if st.button(
-        "🔄 更新最新內容",
-        use_container_width=True,
-    ):
-        st.cache_data.clear()
-        st.rerun()
-
-    if st.button(
-        "🚪 登出系統",
-        use_container_width=True,
-    ):
-        st.session_state.logged_in = False
-        st.session_state.portal_user = {}
-        clear_all_picks()
-        st.rerun()
-
-    # ---- System diagnostics (always visible in sidebar) ----
-    render_diagnostics()
-
-
-# ============================================================
-# 20. Welcome card
-# ============================================================
-
-render_html(
-    f"""
-    <div class="welcome-card">
-        <div class="welcome-name">
-            👋 歡迎回來，
-            <span>{escape(user.get("username"))}</span>
-        </div>
-
-        <div class="welcome-copy">
-            Ultra V3 已啟用全場及半場時段識別，
-            並新增市場走勢審計、Family-out 穩健性、
-            壓力測試與 Prior 比較。每場賽事詳情內
-            可展開查看走勢與模型敏感度分析。
-        </div>
-    </div>
-    """
-)
-
-
-if (
-    raw_recommendations_df.empty
-    and raw_matches_df.empty
-):
-    st.warning(
-        "目前無法讀取 matches 及 recommendations "
-        "工作表，或兩個工作表尚未有資料。"
-    )
-
-
-# ============================================================
-# 21. Apply filters
-# ============================================================
-
-filtered_recommendations = (
-    filter_recommendations(
-        recommendations_df,
-        tiers=selected_tiers,
-        periods=selected_periods,
-        markets=selected_markets,
-        available_periods=period_options,
-        available_markets=market_options,
-        minimum_odds=minimum_odds,
-        maximum_odds=maximum_odds,
-    )
-)
-
-if competition_options:
-    if selected_competitions:
-        filtered_matches = matches_df[
-            matches_df["competition"].isin(
-                selected_competitions
-            )
-        ].copy()
-
-    else:
-        filtered_matches = (
-            matches_df.iloc[0:0].copy()
-        )
-
-else:
-    filtered_matches = matches_df.copy()
-
-allowed_match_ids = matching_match_ids(
-    filtered_recommendations
-)
-
-filtered_matches = filtered_matches[
-    filtered_matches["match_id"]
-    .map(clean_identifier)
-    .isin(allowed_match_ids)
-].copy()
-
-if (
-    show_movement_only
-    and not analysis_df.empty
-):
-    matches_with_movement = {
-        clean_identifier(value)
-        for value in analysis_df[
-            "match_id"
-        ]
-        if clean_identifier(value)
-        and parse_json_field(
-            analysis_df[
-                analysis_df["match_id"]
-                .map(clean_identifier)
-                .eq(
-                    clean_identifier(value)
+        "action": "publish_bundle",
+        "replace_recommendations": True,
+        "match": {
+            "match_id": match_id,
+            "match_name": (
+                match.get("name")
+                or (
+                    f"{match.get('home', '')} "
+                    f"vs {match.get('away', '')}"
                 )
-            ]["movement_audits_json"]
-            .iloc[0]
-            if (
-                clean_identifier(value)
-                and not analysis_df[
-                    analysis_df["match_id"]
-                    .map(clean_identifier)
-                    .eq(
-                        clean_identifier(value)
-                    )
-                ].empty
-            )
-            else ""
-        )
-    }
-
-    filtered_matches = filtered_matches[
-        filtered_matches["match_id"]
-        .map(clean_identifier)
-        .isin(matches_with_movement)
-    ].copy()
-
-
-# ============================================================
-# 22. Match Centre
-# ============================================================
-
-if navigation == "⚽ Match Centre":
-    active_matches = filtered_matches[
-        filtered_matches["status"]
-        .eq("published")
-    ].copy()
-
-    active_ids = {
-        clean_identifier(value)
-        for value in active_matches[
-            "match_id"
-        ]
-        if clean_identifier(value)
-    }
-
-    active_recommendations = (
-        filtered_recommendations[
-            filtered_recommendations[
-                "match_id"
-            ]
-            .map(clean_identifier)
-            .isin(active_ids)
-        ].copy()
-    )
-
-    official_count = int(
-        active_recommendations[
-            "tier"
-        ].eq("OFFICIAL").sum()
-    )
-
-    alternative_count = int(
-        active_recommendations[
-            "tier"
-        ].eq("ALTERNATIVE").sum()
-    )
-
-    heavy_count = int(
-        active_recommendations[
-            "is_heavy"
-        ].map(safe_bool).sum()
-    )
-
-    movement_count = int(
-        active_recommendations[
-            "movement_verdict"
-        ]
-        .map(clean_upper)
-        .ne("")
-        .sum()
-    )
-
-    first, second, third, fourth, fifth = (
-        st.columns(5)
-    )
-
-    first.metric(
-        "公開賽事",
-        len(active_matches),
-    )
-
-    second.metric(
-        "官方推薦",
-        official_count,
-    )
-
-    third.metric(
-        "進取選擇",
-        alternative_count,
-    )
-
-    fourth.metric(
-        "🔥 重心",
-        heavy_count,
-    )
-
-    fifth.metric(
-        "📈 有走勢",
-        movement_count,
-    )
-
-    render_html(
-        """
-        <div class="section-kicker">
-            Ultra V3 Live Match Catalogue
-        </div>
-        """
-    )
-
-    st.header("⚽ Match Centre")
-
-    if active_matches.empty:
-        render_html(
-            """
-            <div class="empty-state">
-                ☘️ 暫時未有符合目前篩選條件的公開賽事。
-                <br>
-                您可以調整時段、賠率、市場或推薦類別。
-            </div>
-            """
-        )
-
-    else:
-        active_matches[
-            "_kickoff_sort"
-        ] = active_matches[
-            "kickoff"
-        ].map(parse_datetime_value)
-
-        active_matches = (
-            active_matches.sort_values(
-                "_kickoff_sort",
-                na_position="last",
-            )
-        )
-
-        for _, match_row in (
-            active_matches.iterrows()
-        ):
-            render_match(
-                match_row.to_dict(),
-                active_recommendations,
-                get_analysis_for(
-                    clean_identifier(
-                        match_row.get(
-                            "match_id"
-                        )
-                    )
-                ),
-            )
-
-
-# ============================================================
-# 23. Manual Parlay Corner
-# ============================================================
-
-elif navigation == "📌 過關專區":
-    render_html(
-        """
-        <div class="parlay-hero">
-            <div class="parlay-eyebrow">
-                ✦ Manual VIP Bulletin
-            </div>
-
-            <div class="parlay-hero-title">
-                📌 雨姐過關專區
-            </div>
-
-            <div class="parlay-hero-copy">
-                集中查看最新人手過關推介、文字訊息及圖片。
-                本區內容以簡單公告形式顯示，不會進行
-                自動計算、盤口分析或結果結算。
-            </div>
-
-            <div class="parlay-disclaimer">
-                ℹ️ 人手分享內容 · 並非 Ultra V3 模型官方推薦
-            </div>
-        </div>
-        """
-    )
-
-    refresh_column, count_column = st.columns(
-        [1, 2]
-    )
-
-    with refresh_column:
-        if st.button(
-            "🔄 更新過關專區",
-            key="refresh_parlay_corner",
-            use_container_width=True,
-        ):
-            st.cache_data.clear()
-            st.rerun()
-
-    parlay_posts = prepare_parlay_posts(
-        parlay_corner_df
-    )
-
-    with count_column:
-        if not parlay_posts.empty:
-            st.info(
-                "目前顯示最新 {n} 則人手推介。".format(
-                    n=min(len(parlay_posts), 30)
-                )
-            )
-
-    if parlay_posts.empty:
-        render_html(
-            """
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 0.5rem;">
-                    📭
-                </div>
-
-                暫時未有過關推介。
-                <br>
-                新的 Google Form 提交內容將會顯示在這裡。
-            </div>
-            """
-        )
-
-    else:
-        parlay_posts = parlay_posts.head(30)
-
-        for post_number, (_, post) in enumerate(
-            parlay_posts.iterrows(),
-            start=1,
-        ):
-            title = clean_text(
-                post.get("title")
-            ) or "最新過關推介"
-
-            recommendation = clean_text(
-                post.get("recommendation")
-            )
-
-            photo_link = clean_text(
-                post.get("photo")
-            )
-
-            timestamp = clean_text(
-                post.get("timestamp")
-            )
-
-            submitted_by = clean_text(
-                post.get("submitted_by")
-            )
-
-            recommendation_html = ""
-
-            if recommendation:
-                safe_recommendation = escape(
-                    recommendation
-                ).replace(
-                    "\n",
-                    "<br>",
-                )
-
-                recommendation_html = (
-                    '<div class="parlay-post-content">'
-                    f"{safe_recommendation}"
-                    "</div>"
-                )
-
-            metadata: List[str] = []
-
-            if timestamp:
-                metadata.append(
-                    "🕒 {t}".format(t=escape(timestamp))
-                )
-
-            if submitted_by:
-                metadata.append(
-                    "👤 {t}".format(t=escape(submitted_by))
-                )
-
-            metadata_html = ""
-
-            if metadata:
-                metadata_html = (
-                    '<div class="parlay-post-meta">'
-                    + "".join(
-                        f"<span>{item}</span>"
-                        for item in metadata
-                    )
-                    + "</div>"
-                )
-
-            render_html(
-                f"""
-                <div class="parlay-post">
-                    <div class="parlay-post-number">
-                        VIP Post · {post_number:02d}
-                    </div>
-
-                    <div class="parlay-post-title">
-                        📌 {escape(title)}
-                    </div>
-
-                    {recommendation_html}
-                    {metadata_html}
-                </div>
-                """
-            )
-
-            if photo_link:
-                image_url = google_drive_image_url(
-                    photo_link
-                )
-
-                render_html(
-                    """
-                    <div class="parlay-photo-label">
-                        🖼️ 推介圖片
-                    </div>
-                    """
-                )
-
-                if image_url:
-                    try:
-                        st.image(
-                            image_url,
-                            caption=title,
-                            use_container_width=True,
-                        )
-
-                    except Exception:
-                        st.warning(
-                            "圖片暫時無法顯示。"
-                            "請確認 Google Drive 圖片已設定為"
-                            "「知道連結的任何人都可查看」。"
-                        )
-
-                else:
-                    st.warning(
-                        "未能識別此圖片的 Google Drive 連結。"
-                    )
-
-                    st.link_button(
-                        "在 Google Drive 查看圖片",
-                        photo_link,
-                        use_container_width=True,
-                    )
-
-            if post_number < len(parlay_posts):
-                render_html(
-                    '<div class="parlay-divider"></div>'
-                )
-
-
-# ============================================================
-# 24. My Picks
-# ============================================================
-
-elif navigation == "🧺 我的選擇":
-    render_html(
-        """
-        <div class="section-kicker">
-            Personal Selection Desk
-        </div>
-        """
-    )
-
-    st.header("🧺 我的選擇")
-
-    st.caption(
-        "此頁只整理您的個人選擇。"
-        "個人選擇不會自動變成官方推薦，"
-        "亦不代表互相獨立。"
-    )
-
-    current_ids = selected_ids()
-
-    selected_rows_df = recommendations_df[
-        recommendations_df["rec_id"]
-        .map(clean_identifier)
-        .isin(current_ids)
-    ].copy()
-
-    if selected_rows_df.empty:
-        render_html(
-            """
-            <div class="empty-state">
-                尚未加入任何選擇。
-                <br>
-                前往 Match Centre，
-                在心儀盤口下方勾選
-                「加入我的選擇」。
-            </div>
-            """
-        )
-
-    else:
-        valid_odds = [
-            value
-            for value in (
-                safe_float(item)
-                for item in selected_rows_df[
-                    "odds"
-                ]
-            )
-            if value is not None
-        ]
-
-        official_selected = int(
-            selected_rows_df[
-                "tier"
-            ].eq("OFFICIAL").sum()
-        )
-
-        represented_matches = (
-            selected_rows_df[
-                "match_id"
-            ]
-            .map(clean_identifier)
-            .nunique()
-        )
-
-        first, second, third, fourth = (
-            st.columns(4)
-        )
-
-        first.metric(
-            "已選項目",
-            len(selected_rows_df),
-        )
-
-        second.metric(
-            "涉及賽事",
-            represented_matches,
-        )
-
-        third.metric(
-            "官方推薦",
-            official_selected,
-        )
-
-        fourth.metric(
-            "平均賠率",
-            (
-"{v:.2f}".format(v=sum(valid_odds) / len(valid_odds))
-                if valid_odds
-                else "—"
             ),
-        )
-
-        warnings = selection_warnings(
-            selected_rows_df.to_dict(
-                orient="records"
-            )
-        )
-
-        if not warnings:
-            st.success(
-                "✅ 目前未發現明顯直接衝突。"
-            )
-
-        for warning in warnings:
-            class_name = {
-                "danger": (
-                    "pick-warning pick-danger"
-                ),
-                "warning": (
-                    "pick-warning"
-                ),
-                "info": (
-                    "pick-warning pick-info"
-                ),
-            }.get(
-                warning["severity"],
-                "pick-warning",
-            )
-
-            render_html(
-                f"""
-                <div class="{class_name}">
-                    <strong>
-                        {escape(warning["title"])}
-                    </strong>
-                    <br>
-                    {escape(warning["message"])}
-                </div>
-                """
-            )
-
-        st.subheader("您的選擇")
-
-        selected_rows_df[
-            "_tier_order"
-        ] = (
-            selected_rows_df["tier"]
-            .map(TIER_ORDER)
-            .fillna(9)
-        )
-
-        selected_rows_df = (
-            selected_rows_df.sort_values(
-                [
-                    "match_id",
-                    "_tier_order",
-                    "period",
-                    "rank",
-                ],
-                na_position="last",
-            )
-        )
-
-        for _, row in (
-            selected_rows_df.iterrows()
-        ):
-            row_dict = row.to_dict()
-
-            match_id = clean_identifier(
-                row_dict.get("match_id")
-            )
-
-            matching_match = matches_df[
-                matches_df["match_id"]
-                .map(clean_identifier)
-                .eq(match_id)
-            ]
-
-            if not matching_match.empty:
-                match_name = clean_text(
-                    matching_match.iloc[0].get(
-                        "match_name"
-                    )
-                )
-
-                if match_name:
-                    st.caption(
-                        f"⚽ {match_name}"
-                    )
-
-            render_recommendation(
-                row_dict,
-                allow_selection=False,
-            )
-
-            rec_id = recommendation_identity(
-                row_dict
-            )
-
-            if st.button(
-                "移除此選擇",
-                key=f"remove_pick_{rec_id}",
-                use_container_width=True,
-            ):
-                remove_pick(rec_id)
-                st.rerun()
-
-        export_columns = [
-            column
-            for column in [
-                "rec_id",
-                "match_id",
-                "tier",
-                "period",
-                "market",
-                "market_scope",
-                "selection",
-                "line",
-                "rec_title",
-                "odds",
-                "conservative_hit",
-                "median_hit",
-                "fair_odds",
-                "is_heavy",
-                "movement_verdict",
-                "movement_probability_change_pp",
-                "family_out_status",
-            ]
-            if column in selected_rows_df.columns
-        ]
-
-        export_csv = (
-            selected_rows_df[
-                export_columns
-            ]
-            .to_csv(index=False)
-            .encode("utf-8-sig")
-        )
-
-        download_column, clear_column = (
-            st.columns(2)
-        )
-
-        with download_column:
-            st.download_button(
-                "📥 下載我的選擇 CSV",
-                data=export_csv,
-                file_name="aegis_ultra_v3_my_picks.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-
-        with clear_column:
-            if st.button(
-                "🗑️ 清除全部選擇",
-                use_container_width=True,
-            ):
-                clear_all_picks()
-                st.rerun()
+            "home_team": match.get(
+                "home"
+            ),
+            "away_team": match.get(
+                "away"
+            ),
+            "competition": match.get(
+                "competition"
+            ),
+            "kickoff": match.get(
+                "kickoff"
+            ),
+            "status": publish_status,
+            "model_direction": analysis[
+                "model_direction"
+            ],
+            "model_summary": (
+                f"AEGIS Engine V{ENGINE_VERSION}"
+            ),
+            "top_scores": "",
+            "final_score": "",
+            "engine_version": ENGINE_VERSION,
+            "runtime_seconds": analysis[
+                "runtime_seconds"
+            ],
+        },
+        "recommendations": records,
+        "analysis": analysis,
+    }
 
 
 # ============================================================
-# 25. Completed archive
+# 10. Session state
 # ============================================================
 
-else:
-    ended_matches = filtered_matches[
-        filtered_matches["status"]
-        .eq("ended")
-    ].copy()
+DEFAULTS = {
+    "result": None,
+    "input_snapshot": None,
+    "analysis_hash": None,
+    "error": None,
+    "traceback": None,
+    "json_input": json_text(
+        example_json_input()
+    ),
+}
 
-    ended_ids = {
-        clean_identifier(value)
-        for value in ended_matches[
-            "match_id"
-        ]
-        if clean_identifier(value)
-    }
-
-    ended_recommendations = (
-        filtered_recommendations[
-            filtered_recommendations[
-                "match_id"
-            ]
-            .map(clean_identifier)
-            .isin(ended_ids)
-        ].copy()
-    )
-
-    official_ended = (
-        ended_recommendations[
-            ended_recommendations["tier"]
-            .eq("OFFICIAL")
-        ]
-    )
-
-    settled_values = {
-        "hit",
-        "win",
-        "half_win",
-        "push",
-        "half_loss",
-        "miss",
-        "loss",
-    }
-
-    settled = official_ended[
-        official_ended["result"].isin(
-            settled_values
-        )
-    ]
-
-    positive_values = {
-        "hit",
-        "win",
-        "half_win",
-    }
-
-    positive_results = int(
-        settled["result"]
-        .isin(positive_values)
-        .sum()
-    )
-
-    settled_count = len(settled)
-
-    positive_rate = (
-        positive_results / settled_count
-        if settled_count
-        else None
-    )
-
-    first, second, third = st.columns(3)
-
-    first.metric(
-        "已完場賽事",
-        len(ended_matches),
-    )
-
-    second.metric(
-        "已結算官方推薦",
-        settled_count,
-    )
-
-    third.metric(
-        "官方推薦命中率",
-        (
-            format_probability(
-                positive_rate
-            )
-            if positive_rate is not None
-            else "—"
-        ),
-    )
-
-    render_html(
-        """
-        <div class="section-kicker">
-            Completed Match Archive
-        </div>
-        """
-    )
-
-    st.header("📜 完場紀錄")
-
-    st.caption(
-        "名義正面結果率把全中、全贏及半贏列為"
-        "正面結果，並非實際投注回報率。"
-    )
-
-    if ended_matches.empty:
-        render_html(
-            """
-            <div class="empty-state">
-                暫時未有符合目前篩選條件的完場紀錄。
-            </div>
-            """
-        )
-
-    else:
-        ended_matches[
-            "_kickoff_sort"
-        ] = ended_matches[
-            "kickoff"
-        ].map(parse_datetime_value)
-
-        ended_matches = (
-            ended_matches.sort_values(
-                "_kickoff_sort",
-                ascending=False,
-                na_position="last",
-            )
-        )
-
-        for _, match_row in (
-            ended_matches.iterrows()
-        ):
-            render_match(
-                match_row.to_dict(),
-                ended_recommendations,
-                get_analysis_for(
-                    clean_identifier(
-                        match_row.get(
-                            "match_id"
-                        )
-                    )
-                ),
-            )
+for key, value in DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[
+            key
+        ] = value
 
 
 # ============================================================
-# 26. Footer
+# 11. Header
 # ============================================================
 
 st.markdown(
-    "<br><br>",
+    f"""
+    <div class="hero">
+        <div class="hero-badge">
+            ENGINE V{html_escape(ENGINE_VERSION)}
+            · APP V{APP_VERSION}
+        </div>
+        <h1 class="hero-title">
+            🛡️ AEGIS ULTRA V3
+        </h1>
+        <div class="hero-text">
+            Sharp-market reconstruction with Multiplicative,
+            Power and Shin de-vigging; Dixon–Coles,
+            Independent Poisson and COM-Poisson prior
+            comparison; target-line-out reconstruction;
+            stress audits; HT–FT coherence; and structured
+            external/Pinnacle/HKJC odds-movement analysis.
+        </div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
+
+
+# ============================================================
+# 12. Sidebar
+# ============================================================
+
+with st.sidebar:
+    st.markdown(
+        "## 🛡️ AEGIS ULTRA"
+    )
+
+    st.caption(
+        f"App V{APP_VERSION} · "
+        f"Engine V{ENGINE_VERSION}"
+    )
+
+    st.success(
+        "V3 features enabled:\n\n"
+        "• Shin de-vig\n"
+        "• Prior comparison\n"
+        "• Odds movement audit"
+    )
+
+    st.divider()
+
+    if st.button(
+        "🗑️ 清除分析",
+        use_container_width=True,
+    ):
+        cached_engine_run.clear()
+
+        st.session_state[
+            "result"
+        ] = None
+
+        st.session_state[
+            "input_snapshot"
+        ] = None
+
+        st.session_state[
+            "analysis_hash"
+        ] = None
+
+        st.session_state[
+            "error"
+        ] = None
+
+        st.session_state[
+            "traceback"
+        ] = None
+
+        st.rerun()
+
+    st.divider()
+
+    st.caption(
+        "CORRECT_SCORE 不可作為輸入市場。"
+        "波膽由 FT 模型自動產生。"
+    )
+
+
+# ============================================================
+# 13. Input interface
+# ============================================================
+
+input_tab, upload_tab, movement_help_tab = st.tabs([
+    "📋 完整 V3 JSON",
+    "📁 上載 JSON",
+    "📈 Odds movement 格式",
+])
+
+input_to_run = None
+
+
+with input_tab:
+    st.info(
+        "可直接修改完整 V3 JSON。"
+        "devig_methods 可包含 SHIN；"
+        "odds_movements 可留空。"
+    )
+
+    json_input = st.text_area(
+        "AEGIS ULTRA V3 輸入",
+        key="json_input",
+        height=680,
+    )
+
+    first, second = st.columns(2)
+
+    with first:
+        run_json = st.button(
+            "🚀 執行 V3 分析",
+            type="primary",
+            use_container_width=True,
+        )
+
+    with second:
+        st.download_button(
+            "⬇️ 下載輸入 JSON",
+            data=json_input,
+            file_name=download_name(
+                "aegis_ultra_v3_input"
+            ),
+            mime="application/json",
+            use_container_width=True,
+        )
+
+    if run_json:
+        try:
+            parsed = json.loads(
+                json_input
+            )
+
+            input_to_run = normalize_v3_input(
+                parsed
+            )
+
+        except Exception as error:
+            st.session_state[
+                "error"
+            ] = str(error)
+
+            st.session_state[
+                "traceback"
+            ] = traceback.format_exc()
+
+
+with upload_tab:
+    uploaded_file = st.file_uploader(
+        "上載 V3 JSON",
+        type=["json"],
+    )
+
+    if uploaded_file is not None:
+        try:
+            uploaded_data = json.loads(
+                uploaded_file
+                .getvalue()
+                .decode("utf-8-sig")
+            )
+
+            st.json(
+                uploaded_data
+            )
+
+            if st.button(
+                "🚀 執行上載 JSON",
+                type="primary",
+                use_container_width=True,
+            ):
+                input_to_run = normalize_v3_input(
+                    uploaded_data
+                )
+
+        except Exception as error:
+            st.error(
+                f"JSON 讀取失敗：{error}"
+            )
+
+
+with movement_help_tab:
+    st.markdown(
+        """
+        ### Odds movement series example
+
+        Each series needs:
+
+        - bookmaker/key
+        - role: `EXTERNAL`, `PRIMARY`, or `HKJC`
+        - period and market
+        - line where required
+        - at least two observations
+        - complete market odds at every observation
+
+        HK odds may be supplied with `"odds_format": "HK"`.
+        """
+    )
+
+    st.code(
+        json_text({
+            "odds_movements": [
+                {
+                    "id": "MOVE_001",
+                    "bookmaker": "Bookmaker A",
+                    "key": "book_a",
+                    "role": "EXTERNAL",
+                    "period": "FT",
+                    "market": "OU",
+                    "line": 2.25,
+                    "odds_format": "DECIMAL",
+                    "observations": [
+                        {
+                            "timestamp": "2026-09-20T10:00:00+08:00",
+                            "odds": {
+                                "over": 1.95,
+                                "under": 1.95,
+                            },
+                        },
+                        {
+                            "timestamp": "2026-09-20T12:00:00+08:00",
+                            "odds": {
+                                "over": 2.05,
+                                "under": 1.85,
+                            },
+                        },
+                    ],
+                }
+            ]
+        }),
+        language="json",
+    )
+
+
+# ============================================================
+# 14. Execute engine
+# ============================================================
+
+if input_to_run is not None:
+    st.session_state[
+        "error"
+    ] = None
+
+    st.session_state[
+        "traceback"
+    ] = None
+
+    with st.expander(
+        "提交給引擎的標準化輸入",
+        expanded=False,
+    ):
+        st.json(
+            input_to_run
+        )
+
+    try:
+        with st.spinner(
+            "執行 V3 市場重建、三種 prior 比較、"
+            "壓力測試、HT–FT 一致性及市場走勢分析……"
+        ):
+            execute_engine(
+                input_to_run
+            )
+
+        st.success(
+            "AEGIS ULTRA V3 分析完成。"
+        )
+
+    except Exception as error:
+        st.session_state[
+            "error"
+        ] = str(error)
+
+        st.session_state[
+            "traceback"
+        ] = traceback.format_exc()
+
+
+if st.session_state.get(
+    "error"
+):
+    st.error(
+        "引擎執行失敗："
+        + st.session_state[
+            "error"
+        ]
+    )
+
+    with st.expander(
+        "技術錯誤詳情",
+        expanded=False,
+    ):
+        st.code(
+            st.session_state.get(
+                "traceback"
+            )
+            or st.session_state[
+                "error"
+            ],
+            language="text",
+        )
+
+
+# ============================================================
+# 15. Results
+# ============================================================
+
+result = st.session_state.get(
+    "result"
+)
+
+if result:
+    st.divider()
+
+    match = result.get(
+        "match",
+        {},
+    )
+
+    st.header(
+        "📡 "
+        + optional_text(
+            match.get("name")
+        )
+    )
+
+    caption = " ｜ ".join(
+        optional_text(value)
+        for value in [
+            match.get("competition"),
+            match.get("kickoff"),
+            match.get("snapshot_time"),
+        ]
+        if optional_text(value)
+    )
+
+    if caption:
+        st.caption(
+            caption
+        )
+
+    recommendations = result.get(
+        "recommendations",
+        [],
+    )
+
+    candidates = result.get(
+        "candidate_markets",
+        [],
+    )
+
+    quality = (
+        result.get(
+            "model_quality",
+            {},
+        ).get(
+            "status",
+            "UNKNOWN",
+        )
+    )
+
+    coherence = (
+        result.get(
+            "ht_ft_coherence",
+            {},
+        ).get(
+            "status",
+            "NOT_AVAILABLE",
+        )
+    )
+
+    movement_status = (
+        result.get(
+            "odds_shift_analysis",
+            {},
+        ).get(
+            "status",
+            "NOT_PROVIDED",
+        )
+    )
+
+    runtime = (
+        result.get(
+            "runtime",
+            {},
+        ).get(
+            "total_seconds"
+        )
+    )
+
+    first, second, third, fourth, fifth = st.columns(
+        5
+    )
+
+    with first:
+        result_summary_card(
+            "模型品質",
+            status_chinese(
+                quality
+            ),
+            "Projection and grid quality",
+            status_css_class(
+                quality
+            ),
+        )
+
+    with second:
+        result_summary_card(
+            "正式推薦",
+            str(
+                len(recommendations)
+            ),
+            f"候選盤 {len(candidates)}",
+        )
+
+    with third:
+        result_summary_card(
+            "HT–FT",
+            status_chinese(
+                coherence
+            ),
+            "Transport coherence",
+            status_css_class(
+                coherence
+            ),
+        )
+
+    with fourth:
+        result_summary_card(
+            "Odds movement",
+            status_chinese(
+                movement_status
+            ),
+            "External/Pinnacle/HKJC",
+            status_css_class(
+                movement_status
+            ),
+        )
+
+    with fifth:
+        result_summary_card(
+            "執行時間",
+            (
+                f"{runtime:.2f} 秒"
+                if safe_float(runtime)
+                is not None
+                else "—"
+            ),
+            f"Engine V{ENGINE_VERSION}",
+        )
+
+    section = st.radio(
+        "結果部分",
+        options=[
+            "正式推薦",
+            "所有候選盤",
+            "Prior 比較",
+            "Odds movement",
+            "穩健性",
+            "波膽參考",
+            "模型診斷",
+            "Portal 發佈",
+            "完整 JSON",
+        ],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    if section == "正式推薦":
+        st.subheader(
+            "正式推薦"
+        )
+
+        if not recommendations:
+            st.warning(
+                "沒有候選盤通過正式推薦條件。"
+            )
+
+        for recommendation in sorted(
+            recommendations,
+            key=lambda item: (
+                PERIOD_ORDER.get(
+                    item.get("period"),
+                    9,
+                ),
+                safe_int(
+                    item.get("rank"),
+                    999,
+                ),
+            ),
+        ):
+            recommendation_card(
+                recommendation
+            )
+
+    elif section == "所有候選盤":
+        st.subheader(
+            "所有候選盤"
+        )
+
+        table = candidate_dataframe(
+            candidates
+        )
+
+        st.dataframe(
+            table,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    elif section == "Prior 比較":
+        st.subheader(
+            "Pre-projection prior comparison"
+        )
+
+        st.info(
+            "Dixon–Coles 仍是唯一 projection baseline。"
+            "Independent Poisson 與 COM-Poisson 只作"
+            " projection 前敏感度診斷。"
+        )
+
+        if not candidates:
+            st.info(
+                "沒有候選盤。"
+            )
+
+        else:
+            labels = [
+                (
+                    f"{candidate.get('id')}｜"
+                    f"{candidate.get('period')}｜"
+                    f"{candidate.get('label')}"
+                )
+                for candidate in candidates
+            ]
+
+            selected_label = st.selectbox(
+                "候選盤",
+                labels,
+            )
+
+            candidate = candidates[
+                labels.index(
+                    selected_label
+                )
+            ]
+
+            comparison = candidate.get(
+                "pre_projection_prior_comparison",
+                {},
+            )
+
+            disparity = comparison.get(
+                "disparity",
+                {},
+            )
+
+            first, second, third = st.columns(
+                3
+            )
+
+            first.metric(
+                "最低 prior",
+                disparity.get(
+                    "minimum_prior"
+                )
+                or "—",
+            )
+
+            second.metric(
+                "最高 prior",
+                disparity.get(
+                    "maximum_prior"
+                )
+                or "—",
+            )
+
+            third.metric(
+                "中位命中率差距",
+                (
+                    f"{safe_float(disparity.get('median_hit_range_pp'), 0.0):.2f}pp"
+                    if safe_float(disparity.get("median_hit_range_pp")) is not None
+                    else "—"
+                ),
+            )
+
+            st.dataframe(
+                prior_dataframe(
+                    candidate
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            with st.expander(
+                "完整 prior comparison",
+                expanded=False,
+            ):
+                st.json(
+                    comparison
+                )
+
+    elif section == "Odds movement":
+        st.subheader(
+            "Structured odds-movement audit"
+        )
+
+        movement = result.get(
+            "odds_shift_analysis",
+            {},
+        )
+
+        status = movement.get(
+            "status",
+            "NOT_PROVIDED",
+        )
+
+        st.info(
+            "狀態："
+            + status_chinese(
+                status
+            )
+        )
+
+        audits = movement.get(
+            "candidate_audits",
+            [],
+        )
+
+        if audits:
+            st.dataframe(
+                movement_dataframe(
+                    audits
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            labels = [
+                (
+                    f"{audit.get('id')}｜"
+                    f"{audit.get('label')}"
+                )
+                for audit in audits
+            ]
+
+            selected_label = st.selectbox(
+                "查看完整走勢分析",
+                labels,
+            )
+
+            st.json(
+                audits[
+                    labels.index(
+                        selected_label
+                    )
+                ]
+            )
+
+        else:
+            st.warning(
+                movement.get(
+                    "note",
+                    "沒有可用 odds movement 資料。",
+                )
+            )
+
+    elif section == "穩健性":
+        st.subheader(
+            "Family-out and stress audit"
+        )
+
+        if candidates:
+            labels = [
+                (
+                    f"{candidate.get('id')}｜"
+                    f"{candidate.get('label')}"
+                )
+                for candidate in candidates
+            ]
+
+            selected_label = st.selectbox(
+                "候選盤",
+                labels,
+                key="robustness_candidate",
+            )
+
+            candidate = candidates[
+                labels.index(
+                    selected_label
+                )
+            ]
+
+            family = candidate.get(
+                "family_out_audit",
+                {},
+            )
+
+            family_hit = (
+                family.get(
+                    "probability",
+                    {},
+                ).get(
+                    "hit",
+                    {},
+                )
+            )
+
+            first, second, third = st.columns(
+                3
+            )
+
+            first.metric(
+                "Family-out",
+                status_chinese(
+                    family.get(
+                        "status"
+                    )
+                ),
+            )
+
+            second.metric(
+                "最低命中率",
+                format_probability(
+                    family_hit.get(
+                        "minimum"
+                    )
+                ),
+            )
+
+            third.metric(
+                "中位命中率",
+                format_probability(
+                    family_hit.get(
+                        "median"
+                    )
+                ),
+            )
+
+            stress = candidate.get(
+                "stress_audit",
+                {},
+            )
+
+            stress_rows = []
+
+            for key, label in [
+                ("light", "輕度"),
+                ("medium", "中度"),
+                ("heavy", "重度"),
+            ]:
+                record = stress.get(
+                    key,
+                    {},
+                )
+
+                stress_rows.append({
+                    "程度": label,
+                    "最低命中率": format_probability(
+                        record.get(
+                            "minimum_hit_probability"
+                        )
+                    ),
+                    "中位命中率": format_probability(
+                        record.get(
+                            "median_hit_probability"
+                        )
+                    ),
+                    "情境數": record.get(
+                        "scenario_count"
+                    ),
+                })
+
+            st.dataframe(
+                pd.DataFrame(
+                    stress_rows
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    elif section == "波膽參考":
+        st.subheader(
+            "🎯 FT 波膽參考"
+        )
+
+        correct_scores = result.get(
+            "correct_scores",
+            {},
+        )
+
+        st.warning(
+            correct_scores.get(
+                "warning",
+                "波膽屬高風險市場。",
+            )
+        )
+
+        scores = correct_scores.get(
+            "recommendations",
+            [],
+        )
+
+        if scores:
+            columns = st.columns(
+                len(scores)
+            )
+
+            for column, score in zip(
+                columns,
+                scores,
+            ):
+                probability = score.get(
+                    "probability",
+                    {},
+                )
+
+                with column:
+                    st.markdown(
+                        f"""
+                        <div class="score-card">
+                            <div class="score-value">
+                                {html_escape(score.get("score"))}
+                            </div>
+                            <div class="score-note">
+                                保守概率
+                                {format_probability(
+                                    probability.get("minimum"),
+                                    2
+                                )}
+                            </div>
+                            <div class="score-note">
+                                中位概率
+                                {format_probability(
+                                    probability.get("median"),
+                                    2
+                                )}
+                                <br>
+                                公平賠率
+                                {format_odds(
+                                    score.get("central_fair_odds"),
+                                    2
+                                )}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.info(
+                "沒有波膽參考。"
+            )
+
+    elif section == "模型診斷":
+        st.subheader(
+            "模型診斷"
+        )
+
+        model = result.get(
+            "model",
+            {},
+        )
+
+        periods = model.get(
+            "periods",
+            {},
+        )
+
+        for period, period_record in sorted(
+            periods.items(),
+            key=lambda item: PERIOD_ORDER.get(
+                item[0],
+                9,
+            ),
+        ):
+            st.markdown(
+                f"### {period}"
+            )
+
+            first, second, third, fourth = st.columns(
+                4
+            )
+
+            first.metric(
+                "最高入球",
+                period_record.get(
+                    "max_goals_per_team"
+                ),
+            )
+
+            second.metric(
+                "狀態數",
+                period_record.get(
+                    "state_count"
+                ),
+            )
+
+            third.metric(
+                "完整情境",
+                period_record.get(
+                    "full_scenario_count"
+                ),
+            )
+
+            fourth.metric(
+                "網格完整",
+                (
+                    "是"
+                    if period_record.get(
+                        "grid_complete"
+                    )
+                    else "否"
+                ),
+            )
+
+            with st.expander(
+                f"{period} full scenarios",
+                expanded=False,
+            ):
+                st.json(
+                    period_record.get(
+                        "full_scenarios",
+                        [],
+                    )
+                )
+
+        with st.expander(
+            "HT–FT coherence",
+            expanded=False,
+        ):
+            st.json(
+                result.get(
+                    "ht_ft_coherence",
+                    {},
+                )
+            )
+
+        with st.expander(
+            "Methodology",
+            expanded=False,
+        ):
+            st.json(
+                result.get(
+                    "methodology",
+                    {},
+                )
+            )
+
+    elif section == "Portal 發佈":
+        st.subheader(
+            "📤 Portal 發佈"
+        )
+
+        publish_status = st.selectbox(
+            "狀態",
+            [
+                "published",
+                "draft",
+            ],
+        )
+
+        selected_ids = set()
+
+        for candidate in candidates:
+            candidate_id = optional_text(
+                candidate.get("id")
+            )
+
+            default_selected = bool(
+                candidate.get("official")
+            )
+
+            if st.checkbox(
+                (
+                    f"{candidate_id}｜"
+                    f"{candidate.get('period')}｜"
+                    f"{candidate.get('label')}"
+                ),
+                value=default_selected,
+                key=(
+                    "publish_"
+                    + candidate_id
+                ),
+            ):
+                selected_ids.add(
+                    candidate_id
+                )
+
+        bundle = build_portal_bundle(
+            result,
+            selected_ids,
+            publish_status,
+        )
+
+        with st.expander(
+            "Portal payload",
+            expanded=False,
+        ):
+            st.json(
+                bundle
+            )
+
+        st.download_button(
+            "⬇️ 下載 Portal payload",
+            data=json_text(
+                bundle
+            ),
+            file_name=download_name(
+                "aegis_portal_bundle"
+            ),
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        if st.button(
+            f"📤 發佈 {len(selected_ids)} 項",
+            type="primary",
+            use_container_width=True,
+            disabled=not bool(
+                selected_ids
+            ),
+        ):
+            try:
+                with st.spinner(
+                    "正在發佈……"
+                ):
+                    response = portal_request(
+                        bundle
+                    )
+
+                    # V3: 一併發布 analysis（走勢 / 穩健性 / 波膽）
+                    analysis = bundle.get(
+                        "analysis"
+                    )
+
+                    analysis_response = None
+
+                    if isinstance(
+                        analysis,
+                        dict,
+                    ) and analysis.get(
+                        "match_id"
+                    ):
+                        try:
+                            analysis_response = portal_request(
+                                {
+                                    "action": "publish_analysis",
+                                    "analysis": analysis,
+                                }
+                            )
+
+                        except Exception as analysis_error:
+                            analysis_response = {
+                                "ok": False,
+                                "error": str(
+                                    analysis_error
+                                ),
+                            }
+
+                st.success(
+                    "Portal 發佈成功。"
+                )
+
+                st.json(
+                    response
+                )
+
+                if analysis_response is not None:
+                    if analysis_response.get(
+                        "ok"
+                    ):
+                        st.success(
+                            "V3 分析資料（走勢 / "
+                            "穩健性 / 波膽）發佈成功。"
+                        )
+
+                    else:
+                        st.warning(
+                            "分析資料發佈未完成："
+                            f"{analysis_response.get('error')}"
+                        )
+
+                    with st.expander(
+                        "分析發布回應",
+                        expanded=False,
+                    ):
+                        st.json(
+                            analysis_response
+                        )
+
+            except Exception as error:
+                st.error(
+                    f"Portal 發佈失敗：{error}"
+                )
+
+                with st.expander(
+                    "錯誤詳情",
+                    expanded=False,
+                ):
+                    st.code(
+                        traceback.format_exc(),
+                        language="text",
+                    )
+
+    elif section == "完整 JSON":
+        st.subheader(
+            "完整引擎輸出"
+        )
+
+        first, second = st.columns(
+            2
+        )
+
+        with first:
+            st.download_button(
+                "⬇️ 下載完整結果",
+                data=json_text(
+                    result
+                ),
+                file_name=download_name(
+                    "aegis_ultra_v3_result"
+                ),
+                mime="application/json",
+                use_container_width=True,
+            )
+
+        with second:
+            st.download_button(
+                "⬇️ 下載標準化輸入",
+                data=json_text(
+                    st.session_state.get(
+                        "input_snapshot"
+                    )
+                    or {}
+                ),
+                file_name=download_name(
+                    "aegis_ultra_v3_input"
+                ),
+                mime="application/json",
+                use_container_width=True,
+            )
+
+        if st.checkbox(
+            "顯示完整 JSON",
+            value=False,
+        ):
+            st.json(
+                result
+            )
+
+else:
+    st.info(
+        "貼上或上載 AEGIS ULTRA V3 JSON，然後開始分析。"
+    )
+
+
+# ============================================================
+# 16. Footer
+# ============================================================
 
 st.divider()
 
 st.caption(
-    f"🛡️ Powered by Aegis Ultra V3 · "
-    f"Match Centre {APP_VERSION}"
+    f"{ENGINE_NAME} · Engine V{ENGINE_VERSION} · "
+    f"Command Center V{APP_VERSION} · "
+    "市場重建及風險分析只供參考，不保證投注結果。"
 )
