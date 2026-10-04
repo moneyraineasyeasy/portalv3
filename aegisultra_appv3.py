@@ -4664,6 +4664,35 @@ matches_df, recommendations_df = (
 user = st.session_state.portal_user
 
 
+def analysis_for_match(
+    analysis_dataframe: pd.DataFrame,
+    match_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Find and parse the analysis record for a given match_id."""
+    if (
+        analysis_dataframe is None
+        or analysis_dataframe.empty
+        or not match_id
+    ):
+        return None
+
+    target = clean_identifier(match_id)
+
+    if "match_id" not in analysis_dataframe.columns:
+        return None
+
+    matches = analysis_dataframe[
+        analysis_dataframe["match_id"]
+        .map(clean_identifier)
+        .eq(target)
+    ]
+
+    if matches.empty:
+        return None
+
+    return matches.iloc[0].to_dict()
+
+
 def get_analysis_for(
     match_id: str,
 ) -> Optional[Dict[str, Any]]:
