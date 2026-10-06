@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import json
 import math
 import os
 import re
@@ -26,7 +27,7 @@ APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
 )
 
 VISIBLE_STATUSES = {
@@ -67,12 +68,6 @@ RECOMMENDATION_DEFAULTS: Dict[str, Any] = {
     "compatibility_group": "",
     "status": "",
     "result": "",
-    # V3.1 movement / robustness fields
-    "movement_verdict": "",
-    "movement_strength": "",
-    "movement_agreement_ratio": None,
-    "movement_probability_change_pp": None,
-    "family_out_status": "",
 }
 
 MATCH_DEFAULTS: Dict[str, Any] = {
@@ -653,6 +648,24 @@ st.markdown(
         border-color: rgba(217, 70, 239, 0.23);
     }
 
+    .period-2h {
+        color: #fcd34d;
+        background: rgba(245, 158, 11, 0.12);
+        border-color: rgba(245, 158, 11, 0.26);
+    }
+
+    .tier-pill-score {
+        color: #ddd6fe;
+        background: rgba(139, 92, 246, 0.14);
+        border: 1px solid rgba(139, 92, 246, 0.28);
+    }
+
+    .tier-pill-unknown {
+        color: #cbd5e1;
+        background: rgba(148, 163, 184, 0.11);
+        border: 1px solid rgba(148, 163, 184, 0.20);
+    }
+
     .heavy-pill {
         margin-left: 0.38rem;
         color: #fff7ed;
@@ -1083,320 +1096,6 @@ st.markdown(
         border-color: rgba(255, 255, 255, 0.08);
     }
 
-    /* ============================================================
-       V3.1 Premium visual upgrade
-       - Glassmorphism cards with hover lift
-       - Animated gradient borders
-       - Glow effects on movement chips
-       - Smooth reveal animations
-       ============================================================ */
-
-    @keyframes shimmer {
-        0% { background-position: -200% 0; }
-        100% { background-position: 200% 0; }
-    }
-
-    @keyframes glow-pulse {
-        0%, 100% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.25); }
-        50% { box-shadow: 0 0 24px rgba(34, 197, 94, 0.55); }
-    }
-
-    @keyframes float-in {
-        from { opacity: 0; transform: translateY(14px); }
-        to   { opacity: 1; transform: translateY(0); }
-    }
-
-    @keyframes border-flow {
-        0%   { --angle: 0deg; }
-        100% { --angle: 360deg; }
-    }
-
-    /* Hero / portal header */
-    .portal-hero {
-        position: relative;
-        background: linear-gradient(
-            135deg,
-            rgba(17, 24, 39, 0.97) 0%,
-            rgba(30, 41, 59, 0.94) 45%,
-            rgba(15, 23, 42, 0.97) 100%
-        );
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        box-shadow:
-            0 20px 60px -20px rgba(0, 0, 0, 0.7),
-            inset 0 1px 0 rgba(255, 255, 255, 0.06);
-        overflow: hidden;
-    }
-
-    .portal-hero::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(
-            900px circle at 85% 15%,
-            rgba(59, 130, 246, 0.10),
-            transparent 55%
-        ),
-        radial-gradient(
-            700px circle at 10% 90%,
-            rgba(16, 185, 129, 0.08),
-            transparent 55%
-        );
-        pointer-events: none;
-    }
-
-    .portal-title {
-        background: linear-gradient(
-            100deg,
-            #f8fafc 10%,
-            #93c5fd 45%,
-            #6ee7b7 80%
-        );
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
-        letter-spacing: -0.02em;
-    }
-
-    /* Recommendation cards */
-    .recommendation-card {
-        position: relative;
-        background: linear-gradient(
-            155deg,
-            rgba(30, 41, 59, 0.72),
-            rgba(15, 23, 42, 0.82)
-        );
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        transition:
-            transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-            box-shadow 220ms ease,
-            border-color 220ms ease;
-        animation: float-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    }
-
-    .recommendation-card:hover {
-        transform: translateY(-4px);
-        border-color: rgba(59, 130, 246, 0.35);
-        box-shadow:
-            0 18px 40px -18px rgba(0, 0, 0, 0.75),
-            0 0 0 1px rgba(59, 130, 246, 0.12);
-    }
-
-    /* Tier accents with glow */
-    .recommendation-card.tier-official {
-        border-left: 3px solid #22c55e;
-    }
-    .recommendation-card.tier-official:hover {
-        box-shadow: 0 18px 40px -18px rgba(34, 197, 94, 0.45);
-    }
-
-    .recommendation-card.tier-alternative {
-        border-left: 3px solid #38bdf8;
-    }
-
-    .recommendation-card.tier-correct-score {
-        border-left: 3px solid #c084fc;
-    }
-
-    .recommendation-card.tier-correct-score:hover {
-        box-shadow: 0 18px 40px -18px rgba(192, 132, 252, 0.45);
-    }
-
-    /* Movement chips with glow */
-    .stat-chip.movement-S,
-    .stat-chip.movement-supported {
-        background: rgba(34, 197, 94, 0.14);
-        border-color: rgba(34, 197, 94, 0.45);
-        color: #86efac;
-        animation: glow-pulse 2.6s ease-in-out infinite;
-    }
-
-    .stat-chip.movement-C,
-    .stat-chip.movement-conflicted {
-        background: rgba(239, 68, 68, 0.13);
-        border-color: rgba(239, 68, 68, 0.45);
-        color: #fca5a5;
-    }
-
-    .stat-chip.movement-N,
-    .stat-chip.movement-neutral {
-        background: rgba(148, 163, 184, 0.12);
-        border-color: rgba(148, 163, 184, 0.3);
-        color: #cbd5e1;
-    }
-
-    .stat-chip.movement-R,
-    .stat-chip.movement-reversed {
-        background: rgba(249, 115, 22, 0.14);
-        border-color: rgba(249, 115, 22, 0.45);
-        color: #fdba74;
-    }
-
-    /* Shimmer on heavy picks */
-    .heavy-badge {
-        background: linear-gradient(
-            100deg,
-            rgba(251, 191, 36, 0.2) 0%,
-            rgba(251, 146, 60, 0.2) 50%,
-            rgba(251, 191, 36, 0.2) 100%
-        );
-        background-size: 200% 100%;
-        animation: shimmer 3.5s ease infinite;
-        border-color: rgba(251, 191, 36, 0.5);
-        color: #fde68a;
-    }
-
-    /* Match heading */
-    .match-heading {
-        background: linear-gradient(
-            155deg,
-            rgba(30, 41, 59, 0.6),
-            rgba(15, 23, 42, 0.78)
-        );
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-    }
-
-    .match-name {
-        font-weight: 700;
-        letter-spacing: -0.01em;
-    }
-
-    /* Score cards (correct score reference) */
-    .score-card {
-        background: linear-gradient(
-            155deg,
-            rgba(124, 58, 237, 0.14),
-            rgba(76, 29, 149, 0.1)
-        );
-        border: 1px solid rgba(192, 132, 252, 0.28);
-        transition:
-            transform 200ms ease,
-            box-shadow 200ms ease;
-    }
-
-    .score-card:hover {
-        transform: translateY(-3px) scale(1.015);
-        box-shadow: 0 14px 30px -14px rgba(192, 132, 252, 0.55);
-        border-color: rgba(192, 132, 252, 0.55);
-    }
-
-    /* Sidebar polish */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(
-            180deg,
-            rgba(15, 23, 42, 0.98),
-            rgba(9, 14, 30, 0.99)
-        );
-        border-right: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    section[data-testid="stSidebar"] .stMarkdown h1,
-    section[data-testid="stSidebar"] .stMarkdown h2,
-    section[data-testid="stSidebar"] .stMarkdown h3 {
-        letter-spacing: -0.01em;
-    }
-
-    /* Metric cards */
-    [data-testid="stMetric"] {
-        background: rgba(30, 41, 59, 0.4);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 16px;
-        padding: 0.75rem 1rem;
-        transition: background 200ms ease, transform 200ms ease;
-    }
-
-    [data-testid="stMetric"]:hover {
-        background: rgba(30, 41, 59, 0.62);
-        transform: translateY(-2px);
-    }
-
-    [data-testid="stMetricLabel"] {
-        color: rgba(203, 213, 225, 0.78);
-        font-size: 0.78rem;
-        letter-spacing: 0.02em;
-    }
-
-    [data-testid="stMetricValue"] {
-        font-weight: 700;
-        letter-spacing: -0.02em;
-    }
-
-    /* Expander panels (analysis) */
-    [data-testid="stExpander"] {
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 14px;
-        overflow: hidden;
-        transition: border-color 200ms ease;
-    }
-
-    [data-testid="stExpander"]:hover {
-        border-color: rgba(59, 130, 246, 0.28);
-    }
-
-    [data-testid="stExpander"] summary {
-        font-weight: 600;
-        letter-spacing: -0.01em;
-    }
-
-    /* Buttons */
-    .stButton > button {
-        border-radius: 12px;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        transition: transform 150ms ease, box-shadow 150ms ease;
-    }
-
-    .stButton > button:hover {
-        transform: translateY(-1px);
-    }
-
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 10px 10px 0 0;
-        letter-spacing: -0.01em;
-    }
-
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 10px;
-        height: 10px;
-    }
-
-    ::-webkit-scrollbar-track {
-        background: rgba(15, 23, 42, 0.6);
-    }
-
-    ::-webkit-scrollbar-thumb {
-        background: rgba(100, 116, 139, 0.4);
-        border-radius: 8px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-        background: rgba(100, 116, 139, 0.65);
-    }
-
-    /* Login screen upgrade */
-    [data-testid="stForm"] {
-        background: rgba(30, 41, 59, 0.45);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
-        padding: 1.5rem;
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-    }
-
-    /* Fade-in for the whole app body on load */
-    [data-testid="stAppViewContainer"] {
-        animation: float-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    }
-
     @media (max-width: 700px) {
         .block-container {
             padding-left: 0.78rem;
@@ -1420,46 +1119,6 @@ st.markdown(
         .match-heading {
             padding: 1rem;
         }
-    }
-
-    /* Result badges */
-    .result-badge {
-        display: inline-block;
-        padding: 0.15rem 0.6rem;
-        border-radius: 6px;
-        font-size: 0.78rem;
-        font-weight: 600;
-        margin-left: 0.4rem;
-    }
-
-    .result-win {
-        background: rgba(34, 197, 94, 0.2);
-        color: #4ade80;
-        border: 1px solid rgba(34, 197, 94, 0.4);
-    }
-
-    .result-loss {
-        background: rgba(239, 68, 68, 0.2);
-        color: #f87171;
-        border: 1px solid rgba(239, 68, 68, 0.4);
-    }
-
-    .result-push {
-        background: rgba(234, 179, 8, 0.2);
-        color: #facc15;
-        border: 1px solid rgba(234, 179, 8, 0.4);
-    }
-
-    .result-void {
-        background: rgba(148, 163, 184, 0.2);
-        color: #94a3b8;
-        border: 1px solid rgba(148, 163, 184, 0.4);
-    }
-
-    .result-pending {
-        background: rgba(100, 116, 139, 0.2);
-        color: #64748b;
-        border: 1px solid rgba(100, 116, 139, 0.4);
     }
     </style>
     """,
@@ -1980,6 +1639,141 @@ def normalize_tier(
     )
 
 
+# ============================================================
+# Tier / period / result presentation
+#
+# 這三個函式把內部標準化的字串（OFFICIAL / HT / win …）
+# 轉成「中文顯示文字 + CSS class + 整顆卡片 class」，供
+# render_recommendation 與結果徽章使用。原本卡片渲染是直接
+# 拼字串，統一到這裡之後，新增 tier / period / result 等級
+# 只要改這一處。
+# ============================================================
+
+def tier_presentation(
+    value: Any,
+) -> Tuple[str, str, str]:
+    """
+    Returns (label, pill_class, card_class).
+
+    card_class 是給整顆推薦卡片外框用的（render_recommendation
+    會把 is_heavy 的卡片改成 recommendation-card-heavy），
+    所以這裡只回傳 tier 本身的樣式。
+    """
+
+    tier = normalize_tier(value)
+
+    if tier == "OFFICIAL":
+        return (
+            "正式推薦",
+            "tier-pill tier-official",
+            "recommendation-card-official",
+        )
+
+    if tier == "CORRECT_SCORE":
+        return (
+            "波膽參考",
+            "tier-pill tier-pill-score",
+            "recommendation-card-score",
+        )
+
+    if tier == "ALTERNATIVE":
+        return (
+            "進取備選",
+            "tier-pill tier-alternative",
+            "recommendation-card-alternative",
+        )
+
+    return (
+        clean_text(value) or "備選",
+        "tier-pill tier-pill-unknown",
+        "recommendation-card-alternative",
+    )
+
+
+def period_presentation(
+    value: Any,
+) -> Tuple[str, str]:
+    """Returns (label, pill_class)."""
+
+    period = normalize_period(value)
+
+    if period == "HT":
+        return (
+            "上半場",
+            "period-pill period-ht",
+        )
+
+    if period == "2H":
+        return (
+            "下半場",
+            "period-pill period-2h",
+        )
+
+    if period == "FT":
+        return (
+            "全場",
+            "period-pill",
+        )
+
+    return (
+        clean_text(value) or "全場",
+        "period-pill",
+    )
+
+
+def result_badge(
+    value: Any,
+) -> str:
+    """
+    把結果狀態轉成一段帶 CSS class 的 HTML 徽章。
+    傳入 None / 空值 / pending 時回傳空字串，
+    避免卡片上出現「待確認」這種無意義標籤。
+    """
+
+    if value is None:
+        return ""
+
+    normalized = normalize_result(value)
+
+    if not normalized or normalized == "pending":
+        return ""
+
+    labels = {
+        "win": "全贏",
+        "hit": "命中",
+        "half_win": "半贏",
+        "push": "和局退款",
+        "half_loss": "半輸",
+        "loss": "全輸",
+        "miss": "未命中",
+    }
+
+    classes = {
+        "win": "result-badge result-hit",
+        "hit": "result-badge result-hit",
+        "half_win": "result-badge result-half-win",
+        "push": "result-badge result-push",
+        "half_loss": "result-badge result-half-loss",
+        "loss": "result-badge result-miss",
+        "miss": "result-badge result-miss",
+    }
+
+    label = labels.get(
+        normalized,
+        clean_text(value),
+    )
+
+    css_class = classes.get(
+        normalized,
+        "result-badge result-push",
+    )
+
+    return (
+        f'<span class="{css_class}">'
+        f'{escape(label)}</span>'
+    )
+
+
 def normalize_status(value: Any) -> str:
     normalized = (
         clean_lower(value)
@@ -2127,169 +1921,11 @@ def load_portal_data() -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
-    pd.DataFrame,
 ]:
-    # ---- 每張表獨立 try-except，避免一張表出錯拖累全部 ----
-    def safe_fetch(table_name: str) -> pd.DataFrame:
-        try:
-            df = fetch_sheet(table_name)
-            return df
-        except Exception as exc:
-            st.sidebar.error(
-                f"❌ 讀取 `{table_name}` 失敗：{exc}"
-            )
-            return pd.DataFrame()
-
-    users_df = safe_fetch("users")
-    matches_df = safe_fetch("matches")
-    recommendations_df = safe_fetch("recommendations")
-    analysis_df = safe_fetch("analysis")
-
-    # ---- 寫入 session_state，讓 sidebar 可以讀取 ----
-    st.session_state["_diag_matches"] = matches_df
-    st.session_state["_diag_recommendations"] = recommendations_df
-    st.session_state["_diag_analysis"] = analysis_df
-    st.session_state["_diag_users"] = users_df
-
     return (
-        users_df,
-        matches_df,
-        recommendations_df,
-        analysis_df,
-    )
-
-
-def render_diagnostics() -> None:
-    """在 sidebar 底部顯示系統診斷資訊（一定看得到）。"""
-    with st.sidebar:
-        st.markdown("---")
-        with st.expander("🔧 系統診斷", expanded=False):
-            matches_df = st.session_state.get(
-                "_diag_matches", pd.DataFrame()
-            )
-            recommendations_df = st.session_state.get(
-                "_diag_recommendations", pd.DataFrame()
-            )
-            analysis_df = st.session_state.get(
-                "_diag_analysis", pd.DataFrame()
-            )
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("matches", f"{len(matches_df)} 行")
-                st.metric("analysis", f"{len(analysis_df)} 行")
-            with col2:
-                st.metric("recommendations", f"{len(recommendations_df)} 行")
-
-            # match_id 比對
-            if not matches_df.empty and not analysis_df.empty:
-                if (
-                    "match_id" in matches_df.columns
-                    and "match_id" in analysis_df.columns
-                ):
-                    ids_m = set(
-                        matches_df["match_id"]
-                        .dropna().astype(str)
-                        .str.strip().str.lower()
-                    )
-                    ids_a = set(
-                        analysis_df["match_id"]
-                        .dropna().astype(str)
-                        .str.strip().str.lower()
-                    )
-                    overlap = ids_m & ids_a
-                    st.caption(
-                        f"matches match_id: {sorted(ids_m)[:3]}"
-                    )
-                    st.caption(
-                        f"analysis match_id: {sorted(ids_a)[:3]}"
-                    )
-                    if overlap:
-                        st.success(f"✅ 對上 {len(overlap)} 個")
-                    else:
-                        st.error("❌ 0 個對上")
-                else:
-                    st.error("⚠️ 某張表缺少 match_id 欄位")
-
-            # debug toggle
-            st.session_state["_debug_analysis"] = st.checkbox(
-                "賽事詳情顯示 analysis 狀態",
-                value=False,
-                key="debug_analysis_toggle",
-            )
-
-
-# ============================================================
-# V3: Parse the analysis sheet into a lookup-friendly form.
-# Each row stores JSON blobs for audits / stress / priors / CS.
-# ============================================================
-
-JSON_ANALYSIS_FIELDS = [
-    "movement_audits_json",
-    "family_out_json",
-    "stress_audits_json",
-    "prior_comparison_json",
-    "correct_scores_json",
-]
-
-
-def prepare_analysis(
-    raw_analysis_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """Normalize the analysis sheet and parse its JSON blob columns."""
-    if raw_analysis_df is None or raw_analysis_df.empty:
-        return pd.DataFrame()
-
-    dataframe = raw_analysis_df.copy()
-
-    for field in JSON_ANALYSIS_FIELDS:
-        if field not in dataframe.columns:
-            dataframe[field] = ""
-
-    return dataframe
-
-
-def parse_analysis_json(
-    value,
-    default=None,
-):
-    """Safely parse a JSON string from an analysis cell."""
-    if default is None:
-        default = []
-
-    if value is None:
-        return default
-
-    text = clean_text(value)
-
-    if not text:
-        return default
-
-    try:
-        decoded = json.loads(text)
-
-    except Exception:
-        return default
-
-    if decoded is None:
-        return default
-
-    return decoded
-
-
-def parse_json_field(
-    value,
-    default=None,
-):
-    """Alias for parse_analysis_json.
-
-    Exists because several render helpers were originally
-    written against this shorter name. Both names resolve
-    to the same implementation.
-    """
-    return parse_analysis_json(
-        value,
-        default=default,
+        fetch_sheet("users"),
+        fetch_sheet("matches"),
+        fetch_sheet("recommendations"),
     )
 
 
@@ -2910,69 +2546,10 @@ def derive_matches_from_recommendations(
             else "published"
         )
 
-        # Try to derive a meaningful match name from the group
-        match_name = ""
-
-        # Check if any row has match_name
-        if "match_name" in group.columns:
-            names = group["match_name"].dropna().unique()
-            if len(names) > 0:
-                match_name = clean_text(names[0])
-
-        # If no match_name, try home_team vs away_team
-        if not match_name:
-            home_team = ""
-            away_team = ""
-
-            if "home_team" in group.columns:
-                homes = group["home_team"].dropna().unique()
-                if len(homes) > 0:
-                    home_team = clean_text(homes[0])
-
-            if "away_team" in group.columns:
-                aways = group["away_team"].dropna().unique()
-                if len(aways) > 0:
-                    away_team = clean_text(aways[0])
-
-            if home_team and away_team:
-                match_name = f"{home_team} vs {away_team}"
-
         rows.append({
             **MATCH_DEFAULTS,
             "match_id": normalized_id,
-            "match_name": match_name,
-            "home_team": (
-                clean_text(
-                    group["home_team"].dropna.iloc[0]
-                )
-                if "home_team" in group.columns
-                and len(group["home_team"].dropna()) > 0
-                else ""
-            ),
-            "away_team": (
-                clean_text(
-                    group["away_team"].dropna.iloc[0]
-                )
-                if "away_team" in group.columns
-                and len(group["away_team"].dropna()) > 0
-                else ""
-            ),
-            "competition": (
-                clean_text(
-                    group["competition"].dropna.iloc[0]
-                )
-                if "competition" in group.columns
-                and len(group["competition"].dropna()) > 0
-                else ""
-            ),
-            "kickoff": (
-                clean_text(
-                    group["kickoff"].dropna.iloc[0]
-                )
-                if "kickoff" in group.columns
-                and len(group["kickoff"].dropna()) > 0
-                else ""
-            ),
+            "match_name": normalized_id,
             "status": status,
         })
 
@@ -3077,10 +2654,192 @@ def prepare_matches(
     return output.reset_index(drop=True)
 
 
-def visible_records(
-    matches: pd.DataFrame,
-    recommendations: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+# ============================================================
+# Analysis table helpers
+#
+# analysis 表由 GAS 端的 publish_analysis 寫入，裡面六個欄位
+# 都是「已經被 JSON.stringify 過的字串」。Portal 要拿來渲染
+# 前必須反序列化；另外 Sheet 可能回傳真正的空字串、
+# 被截斷的字串，或是已經被 decode 成 dict 的值，
+# 這裡全部兜在一個函式裡統一處理。
+# ============================================================
+
+def parse_json_field(
+    value: Any,
+) -> Any:
+    """
+    把 analysis 表裡的 JSON 字串還原成 Python 物件。
+    傳入 None / 空字串 / 非字串值時原樣回傳（dict / list
+    會直接被上層當成已解析的資料使用）。
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(
+        value,
+        (dict, list),
+    ):
+        return value
+
+    text = clean_text(value)
+
+    if not text:
+        return None
+
+    try:
+        decoded = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+
+    # Sheet 儲存格在 50,000 字元處被截斷時會留下不完整的
+    # JSON，parse 一定會失敗，上面已經兜掉，這裡只回 None。
+    return decoded
+
+
+def prepare_analysis(
+    analysis: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    把 raw analysis sheet 規整成一張以 match_id 為 key、
+    *_json 欄位已反序列化的表。同一場比賽有多筆時保留最新
+    （updated_at 最大）那筆。
+    """
+
+    if analysis is None or (
+        isinstance(
+            analysis,
+            pd.DataFrame,
+        )
+        and analysis.empty
+    ):
+        return pd.DataFrame(
+            columns=[
+                "match_id",
+                "model_quality_status",
+                "ht_ft_coherence_status",
+                "odds_movement_status",
+                "model_direction",
+                "engine_version",
+                "runtime_seconds",
+                "published_at",
+                "updated_at",
+                "movement_audits_json",
+                "family_out_json",
+                "stress_audits_json",
+                "prior_comparison_json",
+                "correct_scores_json",
+                "consensus_json",
+            ]
+        )
+
+    if not isinstance(
+        analysis,
+        pd.DataFrame,
+    ):
+        # 容錯：若傳入的是 dict / list，先包成 DataFrame
+        try:
+            analysis = pd.DataFrame(list(analysis))
+        except (TypeError, ValueError):
+            return pd.DataFrame()
+
+    if analysis.empty:
+        return pd.DataFrame(
+            columns=list(
+                analysis.columns
+            )
+            or []
+        )
+
+    output = analysis.copy()
+
+    if "match_id" in output.columns:
+        output["match_id"] = output[
+            "match_id"
+        ].map(clean_identifier)
+
+    # *_json 欄位一律反序列化，讓下游 panel 可以直接當 dict 用
+    for column in output.columns:
+        if not isinstance(
+            column,
+            str,
+        ):
+            continue
+
+        if column.endswith("_json"):
+            output[column] = output[
+                column
+            ].map(parse_json_field)
+
+    # 同一場可能有多筆（多次 publish），保留 updated_at 最新的
+    if (
+        "updated_at" in output.columns
+        and "match_id" in output.columns
+        and not output.empty
+    ):
+        output = output.sort_values(
+            by="updated_at",
+            ascending=False,
+            na_position="first",
+        )
+
+        output = output.drop_duplicates(
+            subset=["match_id"],
+            keep="first",
+        )
+
+    return output.reset_index(drop=True)
+
+
+def analysis_for_match(
+    analysis_df: pd.DataFrame,
+    match_id: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    從已處理好的 analysis 表撈出某一場的遙測記錄。
+    找不到時回傳 None，呼叫端應把它當成「沒有資料」處理，
+    而不是顯示空面板。
+    """
+
+    if analysis_df is None or not isinstance(
+        analysis_df,
+        pd.DataFrame,
+    ):
+        return None
+
+    if analysis_df.empty:
+        return None
+
+    target = clean_identifier(match_id)
+
+    if not target:
+        return None
+
+    if "match_id" not in analysis_df.columns:
+        return None
+
+    matches = analysis_df[
+        analysis_df["match_id"]
+        .map(clean_identifier)
+        .eq(target)
+    ]
+
+    if matches.empty:
+        return None
+
+    record = matches.iloc[0].to_dict()
+
+    return {
+        key: value
+        for key, value in record.items()
+        if isinstance(
+            key,
+            str
+        )
+    }
+
+
+
     visible_matches = matches[
         matches["status"].isin(
             VISIBLE_STATUSES
@@ -3154,6 +2913,281 @@ def remove_pick(rec_id: str) -> None:
 
 def clear_all_picks() -> None:
     st.session_state.my_pick_ids = []
+
+
+# ============================================================
+# Selection conflict checks
+#
+# 使用者在「我的選擇」頁面挑了多條推薦後，這裡做一次交叉檢查：
+#   - 同一場比賽選了互斥盤口（compatibility_group 相同，
+#     engine 已經標記 conflict_ids）
+#   - 同一場選了超過一定數量的注項（過度集中）
+#   - 命中率 / 期望值的極端情況
+#
+# 回傳 dict 清單，每個 dict 有 severity（danger/warning/info）
+# 與 message，前端照 severity 套 pick-warning / pick-danger /
+# pick-info 樣式。
+# ============================================================
+
+MAX_PICKS_PER_MATCH = 4
+
+
+def selection_warnings(
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not rows:
+        return []
+
+    warnings: List[Dict[str, Any]] = []
+
+    normalized: List[Dict[str, Any]] = [
+        {
+            "rec_id": clean_identifier(row.get("rec_id")),
+            "match_id": clean_identifier(
+                row.get("match_id")
+            ),
+            "tier": normalize_tier(row.get("tier")),
+            "period": normalize_period(row.get("period")),
+            "market": normalize_market(row.get("market")),
+            "market_scope": clean_upper(
+                row.get("market_scope")
+            ),
+            "selection": clean_upper(row.get("selection")),
+            "line": safe_float(row.get("line")),
+            "odds": safe_float(row.get("odds")),
+            "compatibility_group": clean_text(
+                row.get("compatibility_group")
+            ),
+            "conflict_ids": _split_conflict_ids(
+                row.get("conflict_ids")
+            ),
+            "median_hit": normalize_probability(
+                row.get("median_hit")
+            ),
+        }
+        for row in rows
+        if isinstance(row, dict)
+    ]
+
+    # ---- 1. 明確衝突：engine 已標記 conflict_ids ----
+    selected_ids = {
+        item["rec_id"]
+        for item in normalized
+        if item["rec_id"]
+    }
+
+    for item in normalized:
+        for conflict_id in item["conflict_ids"]:
+            if conflict_id in selected_ids:
+                warnings.append({
+                    "severity": "danger",
+                    "message": (
+                        f"直接衝突：{escape(item['rec_id'] or '本項')} "
+                        f"與 {escape(conflict_id)} "
+                        f"互斥，兩者不應同時下注。"
+                    ),
+                })
+
+    # ---- 2. 同一 compatibility_group 內選多項 ----
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+
+    for item in normalized:
+        group = item["compatibility_group"]
+
+        if not group:
+            continue
+
+        groups.setdefault(
+            group,
+            []
+        ).append(item)
+
+    for group, items in groups.items():
+        if len(items) > 1:
+            names = ", ".join(
+                escape(item["rec_id"] or "項目")
+                for item in items
+            )
+
+            warnings.append({
+                "severity": "warning",
+                "message": (
+                    f"相容性群組「{escape(group)}」內已選 {len(items)} 項"
+                    f"（{names}），請確認是否為刻意分散風險。"
+                ),
+            })
+
+    # ---- 3. 同一場選了過多注項 ----
+    by_match: Dict[str, List[Dict[str, Any]]] = {}
+
+    for item in normalized:
+        if not item["match_id"]:
+            continue
+
+        by_match.setdefault(
+            item["match_id"],
+            []
+        ).append(item)
+
+    for match_id, items in by_match.items():
+        if len(items) > MAX_PICKS_PER_MATCH:
+            warnings.append({
+                "severity": "warning",
+                "message": (
+                    f"單場過度集中：{escape(match_id)} 已選 "
+                    f"{len(items)} 項，建議不超過 "
+                    f"{MAX_PICKS_PER_MATCH} 項。"
+                ),
+            })
+
+    # ---- 4. 同一場、同一時段、同盤口但相反 selection ----
+    for match_id, items in by_match.items():
+        for i, first in enumerate(items):
+            for second in items[i + 1:]:
+                if (
+                    first["period"] == second["period"]
+                    and first["market"] == second["market"]
+                    and first["market_scope"]
+                    == second["market_scope"]
+                    and first["line"] == second["line"]
+                    and first["selection"]
+                    and second["selection"]
+                    and first["selection"]
+                    != second["selection"]
+                ):
+                    warnings.append({
+                        "severity": "danger",
+                        "message": (
+                            f"同一盤口相反方向："
+                            f"{escape(first['rec_id'])} 與 "
+                            f"{escape(second['rec_id'])} "
+                            f"為互斥盤口。"
+                        ),
+                    })
+
+    # ---- 5. 賠率過低提醒 ----
+    for item in normalized:
+        odds = item["odds"]
+
+        if (
+            odds is not None
+            and odds < 1.05
+        ):
+            warnings.append({
+                "severity": "info",
+                "message": (
+                    f"{escape(item['rec_id'] or '項目')} "
+                    f"賠率過低（{odds:.2f}），"
+                    f"扣水後幾乎沒有預期回報。"
+                ),
+            })
+
+    # 去重並限制數量，避免長清單淹沒畫面
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+
+    for warning in warnings:
+        key = (
+            warning["severity"],
+            warning["message"],
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        deduped.append(warning)
+
+    return deduped[:12]
+
+
+def _split_conflict_ids(value: Any) -> List[str]:
+    """
+    把 conflict_ids 欄位統一拆成字串清單。
+    可接受逗號分隔字串、JSON 陣列、單一字串或 None。
+    """
+
+    if value is None:
+        return []
+
+    if isinstance(
+        value,
+        (list, tuple),
+    ):
+        return [
+            clean_identifier(item)
+            for item in value
+            if clean_text(item)
+        ]
+
+    if isinstance(
+        value,
+        str,
+    ):
+        text = value.strip()
+
+        if not text or text.lower() == "none":
+            return []
+
+        # 已經是 JSON 陣列字串就直接 parse
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+
+                if isinstance(
+                    parsed,
+                    list,
+                ):
+                    return [
+                        clean_identifier(item)
+                        for item in parsed
+                        if clean_text(item)
+                    ]
+            except (TypeError, ValueError):
+                pass
+
+        # 退化成逗號分隔
+        return [
+            clean_identifier(part)
+            for part in text.split(",")
+            if clean_text(part)
+        ]
+
+    return []
+
+
+# ============================================================
+# Expected value formatting
+# ============================================================
+
+def format_ev(
+    value: Any,
+    precision: int = 1,
+) -> str:
+    """
+    把期望值格式化成「+12.3% / -5.4%」的形式。
+    None、0 或無效值顯示成中性的「0.0%」。
+    """
+
+    number = safe_float(value)
+
+    if number is None:
+        return "0.0%"
+
+    percentage = number * 100.0
+
+    if abs(percentage) < 0.05:
+        return "0.0%"
+
+    if percentage > 0:
+        return (
+            f"+{percentage:.{precision}f}%"
+        )
+
+    return (
+        f"{percentage:.{precision}f}%"
+    )
+
 
 
 def update_pick_selection(
@@ -3265,130 +3299,6 @@ def movement_status_class(
         return "mv-neu"
 
     return "mv-na"
-
-
-
-# ==========================================================
-# Tier & Period Presentation Helpers
-# ==========================================================
-
-def tier_presentation(
-    tier_value: Any,
-) -> Tuple[str, str, str]:
-    """Return (label, pill_class, card_class) for a tier."""
-    tier = normalize_tier(tier_value)
-
-    mapping = {
-        "OFFICIAL": (
-            "🟢 官方推薦",
-            "tier-pill-official",
-            "rec-card-official",
-        ),
-        "ALTERNATIVE": (
-            "⚡ 進取選擇",
-            "tier-pill-alternative",
-            "rec-card-alternative",
-        ),
-        "CORRECT_SCORE": (
-            "🎯 波膽",
-            "tier-pill-score",
-            "rec-card-score",
-        ),
-    }
-
-    return mapping.get(
-        tier,
-        ("📌 其他", "tier-pill-alternative", "rec-card-alternative"),
-    )
-
-
-def period_presentation(
-    period_value: Any,
-) -> Tuple[str, str]:
-    """Return (label, pill_class) for a period."""
-    period = clean_upper(period_value)
-
-    mapping = {
-        "FT": ("FT 全場", "period-ft"),
-        "HT": ("HT 半場", "period-ht"),
-        "2H": ("2H 下半場", "period-2h"),
-    }
-
-    return mapping.get(
-        period,
-        (period or "FT", "period-ft"),
-    )
-
-
-
-
-def result_badge(
-    result_value: Any,
-) -> str:
-    """Render a result badge for a recommendation."""
-    result = clean_upper(result_value)
-
-    if not result or result == "PENDING":
-        return ""
-
-    mapping = {
-        "WIN": (
-            '<span class="result-badge result-win">'
-            "✅ 命中"
-            "</span>"
-        ),
-        "LOSS": (
-            '<span class="result-badge result-loss">'
-            "❌ 未中"
-            "</span>"
-        ),
-        "PUSH": (
-            '<span class="result-badge result-push">'
-            "🟡 走盤"
-            "</span>"
-        ),
-        "VOID": (
-            '<span class="result-badge result-void">'
-            "⚪ 作廢"
-            "</span>"
-        ),
-        "HALF_WIN": (
-            '<span class="result-badge result-win">'
-            "✅ 半贏"
-            "</span>"
-        ),
-        "HALF_LOSS": (
-            '<span class="result-badge result-loss">'
-            "❌ 半輸"
-            "</span>"
-        ),
-    }
-
-    return mapping.get(
-        result,
-        f'<span class="result-badge result-pending">{result}</span>',
-    )
-
-
-def format_ev(
-    value: Any,
-    decimals: int = 2,
-) -> str:
-    """Format expected value as percentage."""
-    number = safe_float(value)
-
-    if number is None:
-        return "—"
-
-    # If value is in basis points or > 1, normalize
-    if abs(number) > 1 and abs(number) <= 100:
-        number /= 100
-
-    if number > 0:
-        return f"+{number * 100:.{decimals}f}%"
-
-    return f"{number * 100:.{decimals}f}%"
-
 
 
 def robustness_status_chinese(
@@ -4383,18 +4293,6 @@ def render_match(
         match.get("match_id")
     )
 
-    # ---- DEBUG: 顯示 analysis 是否載入成功 ----
-    if st.session_state.get("_debug_analysis", False):
-        if analysis is None:
-            st.warning(
-                f"⚠️ match_id={match_id} → analysis 為 None"
-            )
-        else:
-            st.success(
-                f"✅ match_id={match_id} → analysis 已載入 "
-                f"({len(analysis)} 欄位)"
-            )
-
     match_recommendations = (
         recommendations[
             recommendations["match_id"]
@@ -4805,11 +4703,13 @@ if "my_pick_ids" not in st.session_state:
     st.session_state.my_pick_ids = []
 
 
-users_df, raw_matches_df, raw_recommendations_df, raw_analysis_df = (
+users_df, raw_matches_df, raw_recommendations_df = (
     load_portal_data()
 )
 
 parlay_corner_df = fetch_sheet("parlay_corner")
+
+raw_analysis_df = fetch_sheet("analysis")
 
 
 # ============================================================
@@ -4997,35 +4897,6 @@ matches_df, recommendations_df = (
 user = st.session_state.portal_user
 
 
-def analysis_for_match(
-    analysis_dataframe: pd.DataFrame,
-    match_id: str,
-) -> Optional[Dict[str, Any]]:
-    """Find and parse the analysis record for a given match_id."""
-    if (
-        analysis_dataframe is None
-        or analysis_dataframe.empty
-        or not match_id
-    ):
-        return None
-
-    target = clean_identifier(match_id)
-
-    if "match_id" not in analysis_dataframe.columns:
-        return None
-
-    matches = analysis_dataframe[
-        analysis_dataframe["match_id"]
-        .map(clean_identifier)
-        .eq(target)
-    ]
-
-    if matches.empty:
-        return None
-
-    return matches.iloc[0].to_dict()
-
-
 def get_analysis_for(
     match_id: str,
 ) -> Optional[Dict[str, Any]]:
@@ -5187,9 +5058,6 @@ with st.sidebar:
         st.session_state.portal_user = {}
         clear_all_picks()
         st.rerun()
-
-    # ---- System diagnostics (always visible in sidebar) ----
-    render_diagnostics()
 
 
 # ============================================================
@@ -5357,10 +5225,9 @@ if navigation == "⚽ Match Centre":
     movement_count = int(
         active_recommendations[
             "movement_verdict"
-        ]
-        .map(clean_upper)
-        .ne("")
-        .sum()
+            .map(clean_upper)
+            .ne("")
+        ].sum()
     )
 
     first, second, third, fourth, fifth = (
