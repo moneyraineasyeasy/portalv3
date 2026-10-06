@@ -23,11 +23,11 @@ import streamlit as st
 
 os.environ["ARROW_DEFAULT_MEMORY_POOL"] = "system"
 
-APP_NAME = "雨姐 Aegis Ultra V3 VIP Match Centre"
+APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
 )
 
 VISIBLE_STATUSES = {
@@ -3829,6 +3829,7 @@ def render_correct_score_cards(
 
 def render_movement_audit_panel(
     analysis: Dict[str, Any],
+    candidate_id: Optional[str] = None,
 ) -> None:
     audits = parse_json_field(
         analysis.get(
@@ -3836,12 +3837,33 @@ def render_movement_audit_panel(
         )
     )
 
+    if audits is None:
+        audits = []
+
+    # 兼容 list 與 dict 兩種結構
+    if isinstance(audits, dict):
+        # 舊結構：以 candidate_id 為 key 的 dict
+        if candidate_id:
+            audits = [
+                audits.get(candidate_id)
+            ]
+        else:
+            audits = list(audits.values())
+
     if not isinstance(audits, list) or not audits:
         st.info(
             "本場沒有可用的結構化走勢審計資料。"
         )
 
         return
+
+    # 若指定了 candidate_id，只保留屬於該推薦的記錄
+    if candidate_id:
+        audits = [
+            a for a in audits
+            if isinstance(a, dict)
+            and clean_text(a.get("candidate_id")) == candidate_id
+        ]
 
     rows: List[Dict[str, Any]] = []
 
@@ -3954,6 +3976,7 @@ def render_movement_audit_panel(
 
 def render_family_out_panel(
     analysis: Dict[str, Any],
+    candidate_id: Optional[str] = None,
 ) -> None:
     family = parse_json_field(
         analysis.get(
@@ -3961,14 +3984,33 @@ def render_family_out_panel(
         )
     )
 
-    if not isinstance(family, dict) or not family:
+    if family is None:
+        family = []
+
+    # 兼容 list 與 dict 兩種結構
+    if isinstance(family, dict):
+        if candidate_id:
+            family = [
+                family.get(candidate_id)
+            ]
+        else:
+            family = list(family.values())
+
+    if not isinstance(family, list) or not family:
         st.info("本場沒有 family-out 穩健性資料。")
         return
 
     rows: List[Dict[str, Any]] = []
 
-    for key, record in family.items():
+    for record in family:
         if not isinstance(record, dict):
+            continue
+
+        # 若指定 candidate_id，只保留屬於該推薦的記錄
+        if (
+            candidate_id
+            and clean_text(record.get("candidate_id")) != candidate_id
+        ):
             continue
 
         probability = record.get(
@@ -3990,7 +4032,7 @@ def render_family_out_panel(
         rows.append({
             "候選盤": escape(
                 clean_text(
-                    record.get("label") or key
+                    record.get("label") or record.get("candidate_id")
                 )
             ),
             "結果": (
@@ -4028,6 +4070,7 @@ def render_family_out_panel(
 
 def render_stress_panel(
     analysis: Dict[str, Any],
+    candidate_id: Optional[str] = None,
 ) -> None:
     stress = parse_json_field(
         analysis.get(
@@ -4035,22 +4078,40 @@ def render_stress_panel(
         )
     )
 
-    if not isinstance(stress, dict) or not stress:
+    if stress is None:
+        stress = []
+
+    # 兼容 list 與 dict 兩種結構
+    if isinstance(stress, dict):
+        if candidate_id:
+            stress = [
+                stress.get(candidate_id)
+            ]
+        else:
+            stress = list(stress.values())
+
+    if not isinstance(stress, list) or not stress:
         st.info("本場沒有壓力測試資料。")
         return
 
     rows: List[Dict[str, Any]] = []
 
-    for candidate_key, candidate_stress in stress.items():
-        if not isinstance(
-            candidate_stress,
-            dict,
+    for candidate_stress in stress:
+        if not isinstance(candidate_stress, dict):
+            continue
+
+        # 若指定 candidate_id，只保留屬於該推薦的記錄
+        if (
+            candidate_id
+            and clean_text(candidate_stress.get("candidate_id")) != candidate_id
         ):
             continue
 
         label = candidate_stress.get(
             "label"
-        ) or candidate_key
+        ) or candidate_stress.get(
+            "candidate_id"
+        )
 
         for level_key, level_label in [
             ("light", "輕度"),
@@ -4059,7 +4120,7 @@ def render_stress_panel(
         ]:
             record = candidate_stress.get(
                 level_key,
-                {},
+                candidate_stress.get(level_key + "_stress", {}),
             )
 
             if not isinstance(record, dict):
@@ -4073,16 +4134,16 @@ def render_stress_panel(
                 "最低命中率": format_probability(
                     record.get(
                         "minimum_hit_probability"
-                    )
+                    ) or record.get("minimum")
                 ),
                 "中位命中率": format_probability(
                     record.get(
                         "median_hit_probability"
-                    )
+                    ) or record.get("median")
                 ),
                 "情境數": record.get(
                     "scenario_count"
-                ),
+                ) or record.get("count"),
             })
 
     if not rows:
@@ -4098,6 +4159,7 @@ def render_stress_panel(
 
 def render_prior_panel(
     analysis: Dict[str, Any],
+    candidate_id: Optional[str] = None,
 ) -> None:
     prior = parse_json_field(
         analysis.get(
@@ -4105,22 +4167,37 @@ def render_prior_panel(
         )
     )
 
-    if not isinstance(prior, dict) or not prior:
-        st.info("本場沒有 prior 比較資料。")
-        return
+    if prior is None:
+        prior = []
 
-    priors = prior.get(
-        "priors",
-        {},
-    )
+    # 兼容 list 與 dict 兩種結構
+    if isinstance(prior, dict):
+        # 舊結構：{candidate_id: {...}} 或 {priors: {...}}
+        if "priors" in prior and isinstance(prior["priors"], dict):
+            items = list(prior["priors"].items())
+        elif candidate_id and candidate_id in prior:
+            items = [(candidate_id, prior[candidate_id])]
+        else:
+            items = list(prior.items())
+    elif isinstance(prior, list):
+        items = []
+        for item in prior:
+            if not isinstance(item, dict):
+                continue
+            if candidate_id and clean_text(item.get("candidate_id")) != candidate_id:
+                continue
+            name = item.get("name") or item.get("prior_name") or item.get("label")
+            items.append((name, item))
+    else:
+        items = []
 
-    if not isinstance(priors, dict) or not priors:
+    if not items:
         st.info("本場沒有 prior 比較資料。")
         return
 
     rows: List[Dict[str, Any]] = []
 
-    for prior_name, prior_record in priors.items():
+    for prior_name, prior_record in items:
         if not isinstance(prior_record, dict):
             continue
 
@@ -4131,21 +4208,21 @@ def render_prior_panel(
             "中位命中率": format_probability(
                 prior_record.get(
                     "median_hit"
-                )
+                ) or prior_record.get("median")
             ),
             "最低命中率": format_probability(
                 prior_record.get(
                     "minimum_hit"
-                )
+                ) or prior_record.get("minimum")
             ),
             "中位 EV": format_ev(
                 prior_record.get(
                     "median_expected_return"
-                )
+                ) or prior_record.get("expected_value")
             ),
             "備註": escape(
                 clean_text(
-                    prior_record.get("note")
+                    prior_record.get("note") or prior_record.get("description")
                 )
             ),
         })
