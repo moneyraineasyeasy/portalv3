@@ -18,7 +18,7 @@ import streamlit as st
 
 
 # ============================================================
-# AEGIS ULTRA V3 VIP MATCH CENTRE
+# AEGIS ULTRA V2 VIP MATCH CENTRE
 # ============================================================
 
 os.environ["ARROW_DEFAULT_MEMORY_POOL"] = "system"
@@ -27,7 +27,7 @@ APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
 )
 
 VISIBLE_STATUSES = {
@@ -4378,6 +4378,58 @@ def render_analysis_panels(
     if not analysis:
         return
 
+    # ---- 除錯模式：顯示 analysis 表各欄位的實際內容 ----
+    debug_mode = st.session_state.get(
+        "analysis_debug_mode",
+        False,
+    )
+
+    if debug_mode:
+        st.warning(
+            "🐛 **Analysis Debug Mode 開啟**"
+        )
+
+        for field in [
+            "movement_audits_json",
+            "family_out_json",
+            "stress_audits_json",
+            "prior_comparison_json",
+            "correct_scores_json",
+            "consensus_json",
+        ]:
+            raw = analysis.get(field, "")
+            raw_len = len(raw) if isinstance(raw, str) else 0
+
+            parsed = parse_json_field(
+                raw
+            )
+
+            if isinstance(
+                parsed,
+                list,
+            ):
+                count = len(parsed)
+            elif isinstance(
+                parsed,
+                dict,
+            ):
+                count = len(parsed)
+            else:
+                count = "N/A"
+
+            st.write(
+                f"**{field}**: "
+                f"raw_len={raw_len}, "
+                f"parsed_type={type(parsed).__name__}, "
+                f"count={count}"
+            )
+
+            if raw_len > 0 and not parsed:
+                st.error(
+                    f"⚠️ {field} 有 {raw_len} 字元但解析失敗！"
+                    f"前 200 字：{str(raw)[:200]}"
+                )
+
     has_movement = parse_json_field(
         analysis.get(
             "movement_audits_json"
@@ -4402,12 +4454,29 @@ def render_analysis_panels(
         )
     )
 
+    if debug_mode:
+        st.info(
+            f"has_movement={bool(has_movement)}, "
+            f"has_family={bool(has_family)}, "
+            f"has_stress={bool(has_stress)}, "
+            f"has_prior={bool(has_prior)}"
+        )
+
     if not any([
         has_movement,
         has_family,
         has_stress,
         has_prior,
     ]):
+        if debug_mode:
+            st.error(
+                "❌ 所有欄位都為空！"
+                "請檢查 App 端的 _debug_log 輸出。"
+            )
+        else:
+            st.info(
+                "本場沒有可用的遙測資料。"
+            )
         return
 
     engine_version = escape(
@@ -5290,6 +5359,19 @@ with st.sidebar:
         value=False,
         help=(
             "勾選後只列出已完成市場走勢審計的場次"
+        ),
+    )
+
+    st.markdown("---")
+
+    st.checkbox(
+        "🐛 Analysis 除錯模式",
+        value=False,
+        key="analysis_debug_mode",
+        help=(
+            "開啟後會顯示 analysis 表各欄位的"
+            "原始字元數、解析結果與筆數，"
+            "用於排查走勢審計 / prior 不顯示的問題"
         ),
     )
 
