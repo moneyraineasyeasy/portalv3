@@ -18,16 +18,16 @@ import streamlit as st
 
 
 # ============================================================
-# AEGIS ULTRA V3 VIP MATCH CENTRE
+# AEGIS ULTRA V2 VIP MATCH CENTRE
 # ============================================================
 
 os.environ["ARROW_DEFAULT_MEMORY_POOL"] = "system"
 
-APP_NAME = "雨姐 Aegis Ultra V3 VIP Match Centre"
+APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
+    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
 )
 
 VISIBLE_STATUSES = {
@@ -2839,6 +2839,37 @@ def analysis_for_match(
     }
 
 
+def visible_records(
+    matches: pd.DataFrame,
+    recommendations: pd.DataFrame,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """過濾只顯示處於可見狀態的賽事與注項。
+
+    賽事必須在 VISIBLE_STATUSES 內，注項則須屬於這些可見賽事，
+    避免出現「有注項但賽事已被隱藏」的孤兒資料。
+    """
+
+    if matches is None:
+        matches = pd.DataFrame()
+
+    if recommendations is None:
+        recommendations = pd.DataFrame()
+
+    if matches.empty:
+        return matches.reset_index(drop=True), (
+            recommendations.reset_index(drop=True)
+        )
+
+    # 防禦性檢查：缺少必要欄位時原樣回傳，避免 KeyError
+    if "status" not in matches.columns:
+        return matches.reset_index(drop=True), (
+            recommendations.reset_index(drop=True)
+        )
+
+    if "status" not in recommendations.columns:
+        return matches.reset_index(drop=True), (
+            recommendations.reset_index(drop=True)
+        )
 
     visible_matches = matches[
         matches["status"].isin(
@@ -2851,6 +2882,11 @@ def analysis_for_match(
             VISIBLE_STATUSES
         )
     ].copy()
+
+    if "match_id" not in visible_matches.columns:
+        return visible_matches.reset_index(drop=True), (
+            visible_recommendations.reset_index(drop=True)
+        )
 
     visible_match_ids = {
         clean_identifier(value)
