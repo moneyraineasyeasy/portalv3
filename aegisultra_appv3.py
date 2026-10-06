@@ -23,11 +23,11 @@ import streamlit as st
 
 os.environ["ARROW_DEFAULT_MEMORY_POOL"] = "system"
 
-APP_NAME = "雨姐 Aegis Ultra V2 VIP Match Centre"
+APP_NAME = "雨姐 Aegis Ultra V3 VIP Match Centre"
 APP_VERSION = "4.0.0"
 
 DEFAULT_SHEET_ID = (
-    "1uOnql_vI_L2OMMNOEgfiUI8uaIArryEOcVYggdLGnLY"
+    "1RejS-0Iksz0OnFoR5Fcq1niOmJ9yjVqQj9OBHhuHalE"
 )
 
 VISIBLE_STATUSES = {
