@@ -1119,6 +1119,48 @@ st.markdown(
         .match-heading {
             padding: 1rem;
         }
+
+        /* ---- V3 analysis tables ---- */
+        .analysis-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.5rem 0 1rem 0;
+            font-size: 0.9rem;
+        }
+
+        .analysis-table th {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 0.6rem 0.8rem;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #334155;
+            white-space: nowrap;
+        }
+
+        .analysis-table td {
+            padding: 0.55rem 0.8rem;
+            border-bottom: 1px solid #1e293b;
+            color: #cbd5e1;
+        }
+
+        .analysis-table tr:hover td {
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .stress-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .stress-group {
+            color: #93c5fd;
+            font-size: 0.95rem;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid #1e293b;
+            margin-bottom: 0.3rem;
+        }
     }
     </style>
     """,
@@ -3865,7 +3907,12 @@ def render_movement_audit_panel(
             and clean_text(a.get("candidate_id")) == candidate_id
         ]
 
-    rows: List[Dict[str, Any]] = []
+    if not audits:
+        st.info("本場沒有可用的走勢審計資料。")
+        return
+
+    # 用 HTML 表格渲染（st.dataframe 不支援 HTML 標籤）
+    html_rows = []
 
     for audit in audits:
         if not isinstance(audit, dict):
@@ -3900,78 +3947,58 @@ def render_movement_audit_panel(
             else ""
         )
 
-        rows.append({
-            "候選盤": (
-                escape(clean_text(audit.get('label')))
-                + "<br>"
-                + "<small>"
-                + escape(clean_text(audit.get('period'))) + " · "
-                + escape(clean_upper(audit.get('market')))
-                + "</small>"
-            ),
-            "走勢結果": (
-                '<span class="{cls}">{label} · {strength}</span>'.format(
-                    cls=movement_status_class(audit.get("verdict")),
-                    label=movement_status_chinese(audit.get('verdict')),
-                    strength=movement_status_chinese(audit.get('strength')),
-                )
-            ),
-            "莊家一致": format_probability(
-                audit.get(
-                    "agreement_ratio"
-                )
-            ),
-            "開盤概率": format_probability(
-                audit.get(
-                    "consensus_opening_probability"
-                ),
-                2,
-            ),
-            "最新概率": format_probability(
-                audit.get(
-                    "consensus_latest_probability"
-                ),
-                2,
-            ),
-            "概率變動": (
-                f"{sign}{change_pp:.2f}pp"
-                if change_pp is not None
-                else "—"
-            ),
-            "Pinnacle": (
-                movement_status_chinese(
-                    primary.get("status")
-                )
-            ),
-            "HKJC": (
-                movement_status_chinese(
-                    hkjc.get("status")
-                )
-            ),
-            "行動提示": escape(
-                clean_text(
-                    audit.get("actionability")
-                ).replace("_", " ")
-            ),
-        })
+        verdict = audit.get("verdict")
+        strength = audit.get("strength")
 
-    if not rows:
-        st.info("本場沒有可用的走勢審計資料。")
-        return
+        html_rows.append(
+            f"""
+            <tr>
+                <td>
+                    <strong>{escape(clean_text(audit.get('label')))}</strong><br>
+                    <small style="opacity:0.7">
+                        {escape(clean_text(audit.get('period')))}
+                        &nbsp;·&nbsp;
+                        {escape(clean_upper(audit.get('market')))}
+                    </small>
+                </td>
+                <td class="{movement_status_class(verdict)}">
+                    {movement_status_chinese(verdict)}
+                    &nbsp;·&nbsp;
+                    {movement_status_chinese(strength)}
+                </td>
+                <td>{format_probability(audit.get('agreement_ratio'))}</td>
+                <td>{format_probability(audit.get('consensus_opening_probability'), 2)}</td>
+                <td>{format_probability(audit.get('consensus_latest_probability'), 2)}</td>
+                <td>{f"{sign}{change_pp:.2f}pp" if change_pp is not None else "—"}</td>
+                <td>{movement_status_chinese(primary.get('status'))}</td>
+                <td>{movement_status_chinese(hkjc.get('status'))}</td>
+                <td>{escape(clean_text(audit.get('actionability', '')).replace('_', ' '))}</td>
+            </tr>
+            """
+        )
 
-    display = pd.DataFrame(rows)
+    table_html = f"""
+    <table class="analysis-table">
+        <thead>
+            <tr>
+                <th>候選盤</th>
+                <th>走勢結果</th>
+                <th>莊家一致</th>
+                <th>開盤概率</th>
+                <th>最新概率</th>
+                <th>概率變動</th>
+                <th>Pinnacle</th>
+                <th>HKJC</th>
+                <th>行動提示</th>
+            </tr>
+        </thead>
+        <tbody>
+            {''.join(html_rows)}
+        </tbody>
+    </table>
+    """
 
-    st.dataframe(
-        display,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "候選盤": st.column_config.TextColumn(
-                "候選盤",
-                width="medium",
-            ),
-        },
-    )
+    render_html(table_html)
 
 
 def render_family_out_panel(
@@ -4061,11 +4088,40 @@ def render_family_out_panel(
         st.info("本場沒有 family-out 資料。")
         return
 
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
-    )
+    # 用 HTML 表格渲染（st.dataframe 不支援 HTML 標籤）
+    html_rows = []
+
+    for row in rows:
+        html_rows.append(
+            f"""
+            <tr>
+                <td><strong>{row['候選盤']}</strong></td>
+                <td>{row['結果']}</td>
+                <td>{row['穩健性']}</td>
+                <td>{row['最低命中率']}</td>
+                <td>{row['中位命中率']}</td>
+            </tr>
+            """
+        )
+
+    table_html = f"""
+    <table class="analysis-table">
+        <thead>
+            <tr>
+                <th>候選盤</th>
+                <th>結果</th>
+                <th>穩健性</th>
+                <th>最低命中率</th>
+                <th>中位命中率</th>
+            </tr>
+        </thead>
+        <tbody>
+            {''.join(html_rows)}
+        </tbody>
+    </table>
+    """
+
+    render_html(table_html)
 
 
 def render_stress_panel(
@@ -4150,10 +4206,58 @@ def render_stress_panel(
         st.info("本場沒有壓力測試資料。")
         return
 
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
+    # 按候選盤分組，用 HTML 渲染
+    from collections import OrderedDict
+
+    grouped: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
+
+    for row in rows:
+        label = row["候選盤"]
+        if label not in grouped:
+            grouped[label] = []
+        grouped[label].append(row)
+
+    html_parts = []
+
+    for label, items in grouped.items():
+        html_parts.append(
+            f'<div class="stress-group"><strong>{label}</strong></div>'
+        )
+
+        item_rows = []
+
+        for item in items:
+            item_rows.append(
+                f"""
+                <tr>
+                    <td>{item['程度']}</td>
+                    <td>{item['最低命中率']}</td>
+                    <td>{item['中位命中率']}</td>
+                    <td>{item['情境數'] if item['情境數'] is not None else '—'}</td>
+                </tr>
+                """
+            )
+
+        html_parts.append(
+            f"""
+            <table class="analysis-table">
+                <thead>
+                    <tr>
+                        <th>程度</th>
+                        <th>最低命中率</th>
+                        <th>中位命中率</th>
+                        <th>情境數</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(item_rows)}
+                </tbody>
+            </table>
+            """
+        )
+
+    render_html(
+        f'<div class="stress-container">{"".join(html_parts)}</div>'
     )
 
 
@@ -4231,15 +4335,45 @@ def render_prior_panel(
         st.info("本場沒有 prior 比較資料。")
         return
 
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
-    )
+    # 用 HTML 表格渲染
+    html_rows = []
+
+    for row in rows:
+        html_rows.append(
+            f"""
+            <tr>
+                <td><strong>{row['Prior']}</strong></td>
+                <td>{row['中位命中率']}</td>
+                <td>{row['最低命中率']}</td>
+                <td>{row['中位 EV']}</td>
+                <td>{row['備註']}</td>
+            </tr>
+            """
+        )
+
+    table_html = f"""
+    <table class="analysis-table">
+        <thead>
+            <tr>
+                <th>Prior 模型</th>
+                <th>中位命中率</th>
+                <th>最低命中率</th>
+                <th>中位 EV</th>
+                <th>備註</th>
+            </tr>
+        </thead>
+        <tbody>
+            {''.join(html_rows)}
+        </tbody>
+    </table>
+    """
+
+    render_html(table_html)
 
 
 def render_analysis_panels(
     analysis: Optional[Dict[str, Any]],
+    candidate_id: Optional[str] = None,
 ) -> None:
     if not analysis:
         return
@@ -4333,7 +4467,8 @@ def render_analysis_panels(
         expanded=False,
     ):
         render_movement_audit_panel(
-            analysis
+            analysis,
+            candidate_id=candidate_id,
         )
 
     with st.expander(
@@ -4341,7 +4476,8 @@ def render_analysis_panels(
         expanded=False,
     ):
         render_family_out_panel(
-            analysis
+            analysis,
+            candidate_id=candidate_id,
         )
 
     with st.expander(
@@ -4349,7 +4485,8 @@ def render_analysis_panels(
         expanded=False,
     ):
         render_stress_panel(
-            analysis
+            analysis,
+            candidate_id=candidate_id,
         )
 
     with st.expander(
@@ -4358,7 +4495,8 @@ def render_analysis_panels(
         expanded=False,
     ):
         render_prior_panel(
-            analysis
+            analysis,
+            candidate_id=candidate_id,
         )
 
 
@@ -4627,7 +4765,8 @@ def render_match(
         # ---- V3 analysis panels ----
         if analysis is not None:
             render_analysis_panels(
-                analysis
+                analysis,
+                candidate_id=None,  # 整場層級顯示全部
             )
 
         official = match_recommendations[
