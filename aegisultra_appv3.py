@@ -5261,9 +5261,10 @@ if navigation == "⚽ Match Centre":
     movement_count = int(
         active_recommendations[
             "movement_verdict"
-            .map(clean_upper)
-            .ne("")
-        ].sum()
+        ]
+        .map(clean_upper)
+        .ne("")
+        .sum()
     )
 
     first, second, third, fourth, fifth = (
