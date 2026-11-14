@@ -5249,7 +5249,7 @@ with st.sidebar:
         "頁面",
         [
             "⚽ Match Centre",
-            "📌 過關專區",
+            "📐 角球專區",
             "🧺 我的選擇",
             "📜 完場紀錄",
         ],
@@ -5649,7 +5649,7 @@ if navigation == "⚽ Match Centre":
 # 23. Manual Parlay Corner
 # ============================================================
 
-elif navigation == "📌 過關專區":
+elif navigation == "📐 角球專區":
     render_html(
         """
         <div class="parlay-hero">
@@ -5658,12 +5658,12 @@ elif navigation == "📌 過關專區":
             </div>
 
             <div class="parlay-hero-title">
-                📌 雨姐過關專區
+                📐 助手角球專區
             </div>
 
             <div class="parlay-hero-copy">
-                集中查看最新人手過關推介、文字訊息及圖片。
-                本區內容以簡單公告形式顯示，不會進行
+                集中查看最新角球推介。
+                本區內容不是系統推薦，均為個人建議；不會進行
                 自動計算、盤口分析或結果結算。
             </div>
 
@@ -5680,7 +5680,7 @@ elif navigation == "📌 過關專區":
 
     with refresh_column:
         if st.button(
-            "🔄 更新過關專區",
+            "🔄 更新角球專區",
             key="refresh_parlay_corner",
             use_container_width=True,
         ):
@@ -5707,9 +5707,9 @@ elif navigation == "📌 過關專區":
                     📭
                 </div>
 
-                暫時未有過關推介。
+                暫時未有角球推介。
                 <br>
-                新的 Google Form 提交內容將會顯示在這裡。
+                新的內容將會顯示在這裡。
             </div>
             """
         )
@@ -5723,7 +5723,7 @@ elif navigation == "📌 過關專區":
         ):
             title = clean_text(
                 post.get("title")
-            ) or "最新過關推介"
+            ) or "最新角球推介"
 
             recommendation = clean_text(
                 post.get("recommendation")
